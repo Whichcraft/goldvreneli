@@ -123,7 +123,7 @@ if page == "Settings":
         # ── AutoTrader defaults ───────────────────────────────────────────────
         st.subheader("AutoTrader Defaults")
         c1, c2, c3, c4 = st.columns(4)
-        f_at_symbol    = c1.text_input("Default Symbol",         value=env_get("AT_SYMBOL",    "AAPL"))
+        f_at_symbol    = c1.text_input("Default Symbol",         value=env_get("AT_SYMBOL",    ""))
         f_at_threshold = c2.number_input("Trailing Stop %",      min_value=0.1, max_value=10.0,
                                           value=float(env_get("AT_THRESHOLD", "0.5")), step=0.1)
         f_at_poll      = c3.number_input("Poll Interval (s)",    min_value=1,
@@ -384,7 +384,7 @@ if broker == "Alpaca (Paper)":
             c1, c2, c3 = st.columns(3)
             at_symbol   = c1.text_input(
                 "Symbol",
-                value=st.session_state.pop("at_prefill", env_get("AT_SYMBOL", "AAPL")),
+                value=st.session_state.pop("at_prefill", env_get("AT_SYMBOL", "")),
             ).upper()
             at_stop_mode = c2.selectbox("Stop Mode", ["PCT", "ATR"],
                                         help="PCT = fixed %; ATR = N × ATR(14) dollars")
