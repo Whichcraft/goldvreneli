@@ -272,7 +272,9 @@ if broker == "Alpaca (Paper)":
         st.divider()
 
         st.subheader("Price Chart")
-        chart_symbol  = st.text_input("Symbol", value="AAPL").upper()
+        chart_symbol  = st.text_input("Symbol",
+                                       value=st.session_state.get("_chart_sym", "AAPL")).upper()
+        st.session_state["_chart_sym"] = chart_symbol
         timeframe_opt = st.selectbox("Timeframe", ["1D", "1W", "1M", "3M"], index=2)
         tf_map   = {"1D": (1,  TimeFrame.Hour), "1W": (7,  TimeFrame.Hour),
                     "1M": (30, TimeFrame.Day),  "3M": (90, TimeFrame.Day)}
@@ -671,12 +673,22 @@ _Adjust thresholds in **⚙️ Settings → Scanner Filters**_
                 st.session_state.scan_results = scan(data_client, top_n=int(top_n),
                                                       progress_cb=on_progress, as_of=as_of_dt,
                                                       filters=scan_filters, symbols=scan_symbols)
-
+            st.session_state.scan_ts = datetime.now()
             progress_bar.empty()
 
         results = st.session_state.get("scan_results", pd.DataFrame())
 
         if not results.empty:
+            scan_ts = st.session_state.get("scan_ts")
+            if scan_ts:
+                age_s = (datetime.now() - scan_ts).total_seconds()
+                age_str = f"{int(age_s / 60)}m ago" if age_s >= 60 else f"{int(age_s)}s ago"
+                stale = age_s > 1800  # 30 min
+                msg = f"Last scan: {scan_ts.strftime('%H:%M:%S')} ({age_str})"
+                if stale:
+                    st.warning(f"Results may be stale — {msg}")
+                else:
+                    st.caption(msg)
             st.success(f"Found {len(results)} candidates. Select rows then send to AutoTrader.")
 
             selection = st.dataframe(
@@ -725,8 +737,10 @@ _Adjust thresholds in **⚙️ Settings → Scanner Filters**_
 
         if feed_type.startswith("Replay"):
             fc1, fc2, fc3 = st.columns(3)
-            bt_symbol = fc1.text_input("Symbol", value="AAPL").upper()
-            bt_date   = fc2.date_input("Date", value=datetime(2024, 11, 15).date(),
+            bt_symbol = fc1.text_input("Symbol", value=env_get("AT_SYMBOL", "")).upper()
+            _today = datetime.now().date()
+            _bt_default_date = _today - timedelta(days=[3, 1, 1, 1, 1, 1, 2][_today.weekday()])
+            bt_date   = fc2.date_input("Date", value=_bt_default_date,
                                         help="Must be a trading day (Mon–Fri, non-holiday)")
             bt_speed  = fc3.number_input("Speed (×)", min_value=1, max_value=10000,
                                           value=200, step=50,
@@ -932,6 +946,19 @@ _Adjust thresholds in **⚙️ Settings → Scanner Filters**_
                 } for e in reversed(s.log)])
                 st.dataframe(log_df, width="stretch", hide_index=True)
 
+            if s.state in (TraderState.SOLD, TraderState.STOPPED):
+                broker_obj = st.session_state.get("bt_broker")
+                fills = broker_obj.fills if broker_obj else []
+                buys  = [f for f in fills if f["action"] == "BUY"]
+                sells = [f for f in fills if f["action"] == "SELL"]
+                pnl_color = "green" if s.pnl >= 0 else "red"
+                st.info(
+                    f"**Session complete** — "
+                    f"P&L: **:{pnl_color}[${s.pnl:+,.2f}]** | "
+                    f"Buys: {len(buys)} | Sells: {len(sells)} | "
+                    f"Total fills: {len(fills)}"
+                )
+
             if s.state == TraderState.WATCHING:
                 time.sleep(1)
                 st.rerun()
@@ -942,7 +969,7 @@ _Adjust thresholds in **⚙️ Settings → Scanner Filters**_
         st.subheader("Session History")
         if st.button("Refresh history"):
             st.rerun()
-        sessions = load_sessions(bt_output if "bt_output" in dir() else DEFAULT_FILLS)
+        sessions = load_sessions(bt_output)
         if sessions:
             rows = []
             for s in sessions:
@@ -1073,11 +1100,12 @@ else:
     summary = ib.accountSummary()
     tags = {v.tag: v.value for v in summary if v.currency in ("USD", "")}
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("Net Liquidation", f"${float(tags.get('NetLiquidation', 0)):,.2f}")
     col2.metric("Total Cash",      f"${float(tags.get('TotalCashValue', 0)):,.2f}")
     col3.metric("Buying Power",    f"${float(tags.get('BuyingPower', 0)):,.2f}")
     col4.metric("Unrealized P&L",  f"${float(tags.get('UnrealizedPnL', 0)):,.2f}")
+    col5.metric("Realized P&L",    f"${float(tags.get('RealizedPnL', 0)):,.2f}")
 
     st.divider()
 
