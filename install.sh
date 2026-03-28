@@ -325,6 +325,9 @@ if [[ -n "$TARGET_DIR" ]]; then
     INSTALL_DIR="$(realpath -m "$TARGET_DIR")"
 elif [[ "$SCRIPT_DIR" == "$HOME/goldvreneli" ]]; then
     INSTALL_DIR="$SCRIPT_DIR"
+elif $DO_UNINSTALL || $DO_UPDATE; then
+    # Non-interactive modes: use default without prompting
+    INSTALL_DIR="$HOME/goldvreneli"
 else
     DEFAULT_DIR="$HOME/goldvreneli"
     read -rp "$(echo -e "${CYAN}[INPUT]${NC} Install to $DEFAULT_DIR? [Y/n]: ")" dir_confirm
