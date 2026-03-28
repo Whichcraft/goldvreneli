@@ -13,7 +13,7 @@ from autotrader import (
     StopMode, EntryMode, size_from_risk,
 )
 from replay import ReplayPriceFeed, SyntheticPriceFeed, MockBroker, load_sessions
-from scanner import scan
+from scanner import scan, ScanFilters, UNIVERSE
 
 INSTALL_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_FILE    = os.path.join(INSTALL_DIR, ".env")
@@ -123,7 +123,7 @@ if page == "Settings":
         # ── AutoTrader defaults ───────────────────────────────────────────────
         st.subheader("AutoTrader Defaults")
         c1, c2, c3, c4 = st.columns(4)
-        f_at_symbol    = c1.text_input("Default Symbol",         value=env_get("AT_SYMBOL",    "AAPL"))
+        f_at_symbol    = c1.text_input("Default Symbol",         value=env_get("AT_SYMBOL",    ""))
         f_at_threshold = c2.number_input("Trailing Stop %",      min_value=0.1, max_value=10.0,
                                           value=float(env_get("AT_THRESHOLD", "0.5")), step=0.1)
         f_at_poll      = c3.number_input("Poll Interval (s)",    min_value=1,
@@ -135,16 +135,26 @@ if page == "Settings":
         st.divider()
 
         # ── Scanner defaults ──────────────────────────────────────────────────
-        st.subheader("Scanner Defaults")
+        st.subheader("Scanner Filters")
         c1, c2, c3, c4 = st.columns(4)
-        f_scan_n       = c1.number_input("Top N results",        min_value=1, max_value=30,
-                                          value=int(env_get("SCAN_TOP_N", "10")))
-        f_scan_rsi_lo  = c2.number_input("RSI min",              min_value=1,  max_value=99,
-                                          value=int(env_get("SCAN_RSI_LO", "40")))
-        f_scan_rsi_hi  = c3.number_input("RSI max",              min_value=1,  max_value=99,
-                                          value=int(env_get("SCAN_RSI_HI", "65")))
-        f_scan_vol_mult= c4.number_input("Volume multiplier",    min_value=0.1, max_value=10.0,
-                                          value=float(env_get("SCAN_VOL_MULT", "1.5")), step=0.1)
+        f_scan_n          = c1.number_input("Top N results",       min_value=1,   max_value=50,
+                                             value=int(env_get("SCAN_TOP_N",        "10")))
+        f_scan_rsi_lo     = c2.number_input("RSI min",             min_value=1,   max_value=99,
+                                             value=int(env_get("SCAN_RSI_LO",       "35")))
+        f_scan_rsi_hi     = c3.number_input("RSI max",             min_value=1,   max_value=99,
+                                             value=int(env_get("SCAN_RSI_HI",       "72")))
+        f_scan_vol_mult   = c4.number_input("Volume multiplier",   min_value=0.0, max_value=10.0,
+                                             value=float(env_get("SCAN_VOL_MULT",   "1.0")), step=0.1)
+        c1, c2, c3, c4 = st.columns(4)
+        f_scan_min_price  = c1.number_input("Min price ($)",       min_value=0.0,
+                                             value=float(env_get("SCAN_MIN_PRICE",  "5.0")), step=1.0)
+        f_scan_min_adv    = c2.number_input("Min ADV ($M)",        min_value=0.0,
+                                             value=float(env_get("SCAN_MIN_ADV_M",  "5.0")), step=1.0)
+        f_scan_sma20_tol  = c3.number_input("SMA20 tolerance (%)", min_value=0.0, max_value=20.0,
+                                             value=float(env_get("SCAN_SMA20_TOL",  "3.0")), step=0.5,
+                                             help="Allow price this % below SMA20")
+        f_scan_min_ret5d  = c4.number_input("Min 5d return (%)",   min_value=-20.0, max_value=20.0,
+                                             value=float(env_get("SCAN_MIN_RET5D",  "-1.0")), step=0.5)
 
         st.divider()
         saved = st.form_submit_button("Save Settings", type="primary")
@@ -166,6 +176,10 @@ if page == "Settings":
             "SCAN_RSI_LO":             str(f_scan_rsi_lo),
             "SCAN_RSI_HI":             str(f_scan_rsi_hi),
             "SCAN_VOL_MULT":           str(f_scan_vol_mult),
+            "SCAN_MIN_PRICE":          str(f_scan_min_price),
+            "SCAN_MIN_ADV_M":          str(f_scan_min_adv),
+            "SCAN_SMA20_TOL":          str(f_scan_sma20_tol),
+            "SCAN_MIN_RET5D":          str(f_scan_min_ret5d),
         })
         # Clear cached clients so they reconnect with new keys
         get_alpaca_clients.clear()
@@ -370,7 +384,7 @@ if broker == "Alpaca (Paper)":
             c1, c2, c3 = st.columns(3)
             at_symbol   = c1.text_input(
                 "Symbol",
-                value=st.session_state.pop("at_prefill", env_get("AT_SYMBOL", "AAPL")),
+                value=st.session_state.pop("at_prefill", env_get("AT_SYMBOL", "")),
             ).upper()
             at_stop_mode = c2.selectbox("Stop Mode", ["PCT", "ATR"],
                                         help="PCT = fixed %; ATR = N × ATR(14) dollars")
@@ -541,25 +555,53 @@ if broker == "Alpaca (Paper)":
         st.subheader("Position Scanner")
         st.caption("Scans ~600 liquid US stocks, ETFs, and ADRs, applies technical filters, proposes the top candidates.")
 
+        # ── Build filters from saved settings ─────────────────────────────────
+        scan_filters = ScanFilters(
+            min_price     = float(env_get("SCAN_MIN_PRICE", "5.0")),
+            min_adv_m     = float(env_get("SCAN_MIN_ADV_M", "5.0")),
+            rsi_lo        = float(env_get("SCAN_RSI_LO",    "35")),
+            rsi_hi        = float(env_get("SCAN_RSI_HI",    "72")),
+            vol_mult      = float(env_get("SCAN_VOL_MULT",  "1.0")),
+            sma20_tol_pct = float(env_get("SCAN_SMA20_TOL", "3.0")),
+            min_ret_5d    = float(env_get("SCAN_MIN_RET5D", "-1.0")),
+        )
+
         col_a, col_b, col_c = st.columns([1, 2, 2])
-        top_n    = col_a.number_input("Top N results", min_value=1, max_value=30,
-                                       value=int(env_get("SCAN_TOP_N", "10")))
-        use_hist = col_b.checkbox("Historical date", value=False)
+        top_n      = col_a.number_input("Top N results", min_value=1, max_value=50,
+                                         value=int(env_get("SCAN_TOP_N", "10")))
+        use_hist   = col_b.checkbox("Historical date", value=False)
         as_of_date = col_c.date_input("As-of date", value=datetime.now().date(),
                                        disabled=not use_hist)
-        run_scan = st.button("Run Scan", type="primary")
 
-        with st.expander("Filters applied"):
+        # ── Symbol selection ──────────────────────────────────────────────────
+        with st.expander(f"Symbol list ({len(UNIVERSE)} in universe)", expanded=False):
+            sel_all = st.checkbox("Scan full universe", value=True, key="scan_sel_all")
+            selected_syms = st.multiselect(
+                "Or pick specific symbols",
+                options=sorted(UNIVERSE),
+                default=[],
+                disabled=sel_all,
+                placeholder="Type to search…",
+            )
+        scan_symbols = None if sel_all or not selected_syms else selected_syms
+
+        with st.expander("Active filters"):
             st.markdown(f"""
-| Filter | Condition |
-|--------|-----------|
-| Trend | Price > SMA20 and SMA50 |
-| RSI(14) | {env_get("SCAN_RSI_LO", "40")} – {env_get("SCAN_RSI_HI", "65")} |
-| Volume | > {env_get("SCAN_VOL_MULT", "1.5")}× 20-day average |
-| Liquidity | Price > $5, ADV > $5M |
-| Momentum | 5-day return > 0% |
-| Score | Weighted: 5d return × 2, 20d return × 0.5, RSI quality, MACD histogram |
+| Filter | Value |
+|--------|-------|
+| Symbols | {"Full universe (%d)" % len(UNIVERSE) if scan_symbols is None else "%d selected" % len(scan_symbols)} |
+| Min price | ${scan_filters.min_price:.0f} |
+| Min ADV | ${scan_filters.min_adv_m:.0f}M |
+| RSI(14) | {scan_filters.rsi_lo:.0f} – {scan_filters.rsi_hi:.0f} |
+| Volume | ≥ {scan_filters.vol_mult:.1f}× 20-day avg |
+| SMA20 tolerance | {scan_filters.sma20_tol_pct:.1f}% below allowed |
+| Min 5d return | {scan_filters.min_ret_5d:.1f}% |
+| Above SMA50 | required |
+
+_Adjust thresholds in **⚙️ Settings → Scanner Filters**_
 """)
+
+        run_scan = st.button("Run Scan", type="primary")
 
         if run_scan:
             progress_bar = st.progress(0, text="Scanning…")
@@ -570,7 +612,8 @@ if broker == "Alpaca (Paper)":
             as_of_dt = datetime.combine(as_of_date, datetime.max.time()) if use_hist else None
             with st.spinner("Running scan…"):
                 st.session_state.scan_results = scan(data_client, top_n=int(top_n),
-                                                      progress_cb=on_progress, as_of=as_of_dt)
+                                                      progress_cb=on_progress, as_of=as_of_dt,
+                                                      filters=scan_filters, symbols=scan_symbols)
 
             progress_bar.empty()
 
