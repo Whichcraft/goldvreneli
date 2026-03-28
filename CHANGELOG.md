@@ -6,6 +6,10 @@ All notable changes to this project will be documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.6.0] — 2026-03-28
+
 ### Added
 - Scanner results are now selectable (single-row); a "Send to AutoTrader" button pre-fills the AutoTrader symbol and navigates to the AutoTrader page automatically.
 
