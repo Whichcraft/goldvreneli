@@ -131,19 +131,39 @@ create_env_file() {
         warn ".env already exists — keeping existing credentials."
         return
     fi
+
     info "Creating .env template…"
     GW_VERSION_PATH=""
     if ls "$GATEWAY_DIR"/*/ibgateway &>/dev/null 2>&1; then
         GW_VERSION_PATH="$(dirname "$(ls "$GATEWAY_DIR"/*/ibgateway | head -1)")"
     fi
+
+    ALPACA_KEY="" ALPACA_SECRET="" IBKR_USER="" IBKR_PASS=""
+
+    # Ask for API keys
+    echo ""
+    read -rp "$(echo -e "${CYAN}[INPUT]${NC} Enter Alpaca API keys now? [Y/n]: ")" want_alpaca
+    if [[ ! "$want_alpaca" =~ ^[Nn]$ ]]; then
+        read -rp "$(echo -e "${CYAN}[INPUT]${NC} Alpaca API Key:    ")" ALPACA_KEY
+        read -rsp "$(echo -e "${CYAN}[INPUT]${NC} Alpaca Secret Key: ")" ALPACA_SECRET
+        echo ""
+    fi
+
+    read -rp "$(echo -e "${CYAN}[INPUT]${NC} Enter IBKR credentials now? [Y/n]: ")" want_ibkr
+    if [[ ! "$want_ibkr" =~ ^[Nn]$ ]]; then
+        read -rp "$(echo -e "${CYAN}[INPUT]${NC} IBKR Username: ")" IBKR_USER
+        read -rsp "$(echo -e "${CYAN}[INPUT]${NC} IBKR Password: ")" IBKR_PASS
+        echo ""
+    fi
+
     cat > "$ENV_FILE" <<EOF
 # ── Alpaca Paper Trading ──────────────────────────────────────────────────────
-ALPACA_PAPER_API_KEY=
-ALPACA_PAPER_SECRET_KEY=
+ALPACA_PAPER_API_KEY=${ALPACA_KEY}
+ALPACA_PAPER_SECRET_KEY=${ALPACA_SECRET}
 
 # ── IBKR Credentials ─────────────────────────────────────────────────────────
-IBKR_USERNAME=
-IBKR_PASSWORD=
+IBKR_USERNAME=${IBKR_USER}
+IBKR_PASSWORD=${IBKR_PASS}
 IBKR_MODE=paper
 
 # ── IBC / Gateway paths ───────────────────────────────────────────────────────
@@ -161,7 +181,7 @@ SCAN_RSI_LO=40
 SCAN_RSI_HI=65
 SCAN_VOL_MULT=1.5
 EOF
-    success ".env template created."
+    success ".env created."
 }
 
 # ── update ────────────────────────────────────────────────────────────────────
@@ -340,3 +360,14 @@ $SKIP_GATEWAY || install_ib_gateway
 $SKIP_IBC     || install_ibc
 create_env_file
 print_summary
+
+# Ask to launch
+read -rp "$(echo -e "${CYAN}[INPUT]${NC} Launch Goldvreneli now and open browser? [Y/n]: ")" want_launch
+if [[ ! "$want_launch" =~ ^[Nn]$ ]]; then
+    info "Starting Goldvreneli…"
+    cd "$INSTALL_DIR"
+    # Open browser after a short delay to let Streamlit start
+    (sleep 3 && xdg-open "http://localhost:8501" 2>/dev/null || true) &
+    source venv/bin/activate
+    streamlit run app.py
+fi
