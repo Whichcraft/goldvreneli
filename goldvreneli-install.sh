@@ -171,6 +171,34 @@ install_ibc() {
     success "IBC installed at $IBC_DIR."
 }
 
+# ── patch stale .env paths ────────────────────────────────────────────────────
+patch_env_paths() {
+    local ENV_FILE="$INSTALL_DIR/.env"
+    [[ -f "$ENV_FILE" ]] || return
+    local changed=false
+    # Replace any IBC_PATH that doesn't already point inside INSTALL_DIR
+    if grep -q "^IBC_PATH=" "$ENV_FILE"; then
+        local cur_ibc
+        cur_ibc="$(grep "^IBC_PATH=" "$ENV_FILE" | cut -d= -f2- | tr -d '"' | sed "s|~|$HOME|g")"
+        if [[ "$cur_ibc" != "$IBC_DIR" ]]; then
+            sed -i "s|^IBC_PATH=.*|IBC_PATH=${IBC_DIR}|" "$ENV_FILE"
+            changed=true
+        fi
+    fi
+    # Replace any GATEWAY_PATH that doesn't already point inside INSTALL_DIR
+    if grep -q "^GATEWAY_PATH=" "$ENV_FILE"; then
+        local cur_gw
+        cur_gw="$(grep "^GATEWAY_PATH=" "$ENV_FILE" | cut -d= -f2- | tr -d '"' | sed "s|~|$HOME|g")"
+        if [[ "$cur_gw" != "$GATEWAY_DIR"* ]]; then
+            local gw_versioned
+            gw_versioned="$(ls -d "$GATEWAY_DIR"/*/ 2>/dev/null | head -1)"
+            sed -i "s|^GATEWAY_PATH=.*|GATEWAY_PATH=${gw_versioned:-$GATEWAY_DIR}|" "$ENV_FILE"
+            changed=true
+        fi
+    fi
+    $changed && success ".env paths updated to install directory ($INSTALL_DIR)." || true
+}
+
 # ── .env ──────────────────────────────────────────────────────────────────────
 create_env_file() {
     ENV_FILE="$INSTALL_DIR/.env"
@@ -250,6 +278,7 @@ do_update() {
                 success "Pulled v$CUR_VERSION → v$NEW_VERSION"
             fi
             # Skip the clone-and-deploy path
+            patch_env_paths
             info "Updating Python dependencies…"
             cd "$INSTALL_DIR"
             venv/bin/pip install --quiet --upgrade pip
@@ -290,6 +319,7 @@ do_update() {
 
     info "Deploying updated production files…"
     deploy_files "$TMP_REPO" "$INSTALL_DIR"
+    patch_env_paths
 
     # Only check IB Gateway if binary was already installed here
     if ls "$GATEWAY_DIR"/*/ibgateway &>/dev/null 2>&1; then
@@ -428,7 +458,7 @@ fi
 
 # All components live under the install directory
 IBC_DIR="$INSTALL_DIR/ibc"
-GATEWAY_DIR="$INSTALL_DIR/ibgateway"
+GATEWAY_DIR="$INSTALL_DIR/Jts/ibgateway"
 
 # ── dispatch ──────────────────────────────────────────────────────────────────
 if $DO_UNINSTALL; then

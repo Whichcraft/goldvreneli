@@ -1,6 +1,6 @@
 # Goldvreneli Trading Dashboard
 
-![Version](https://img.shields.io/badge/version-0.9.0-blue)
+![Version](https://img.shields.io/badge/version-0.10.0-blue)
 
 A Streamlit-based trading dashboard supporting **Alpaca Paper Trading** and **Interactive Brokers (IBKR)** via IB Gateway, with automated trading and position scanning.
 
@@ -67,8 +67,8 @@ IBKR_USERNAME=
 IBKR_PASSWORD=
 
 # Paths (auto-detected by installer)
-IBC_PATH=~/ibc
-GATEWAY_PATH=~/Jts/ibgateway
+IBC_PATH=~/goldvreneli/ibc
+GATEWAY_PATH=~/goldvreneli/Jts/ibgateway
 ```
 
 Get Alpaca paper API keys at [alpaca.markets](https://alpaca.markets) → Paper Trading → API Keys.

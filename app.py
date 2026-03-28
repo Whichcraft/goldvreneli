@@ -15,7 +15,8 @@ from autotrader import (
 from replay import ReplayPriceFeed, SyntheticPriceFeed, MockBroker, load_sessions
 from scanner import scan
 
-ENV_FILE = os.path.join(os.path.dirname(__file__), ".env")
+INSTALL_DIR = os.path.dirname(os.path.abspath(__file__))
+ENV_FILE    = os.path.join(INSTALL_DIR, ".env")
 
 # ── Config ────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title=f"Goldvreneli Trading v{__version__}", layout="wide")
@@ -120,8 +121,8 @@ if page == "Settings":
         f_ibkr_mode    = c3.selectbox("Trading Mode",  ["paper", "live"],
                                        index=0 if env_get("IBKR_MODE", "paper") == "paper" else 1)
         c4, c5 = st.columns(2)
-        f_ibc_path     = c4.text_input("IBC Path",     value=env_get("IBC_PATH",     "~/ibc"))
-        f_gateway_path = c5.text_input("Gateway Path", value=env_get("GATEWAY_PATH", "~/Jts/ibgateway"))
+        f_ibc_path     = c4.text_input("IBC Path",     value=env_get("IBC_PATH",     os.path.join(INSTALL_DIR, "ibc")))
+        f_gateway_path = c5.text_input("Gateway Path", value=env_get("GATEWAY_PATH", os.path.join(INSTALL_DIR, "Jts", "ibgateway")))
 
         st.divider()
 
@@ -867,9 +868,10 @@ if broker == "Alpaca (Paper)":
                 fills = s.get("fills", [])
                 if not fills:
                     continue
+                pnl_str = f"${s['pnl']:+,.2f}" if s.get('pnl') is not None else 'open'
                 label = (f"Session {s.get('id','?')}  "
                          f"{s.get('meta',{}).get('symbol','?')}  "
-                         f"P&L {f\"${s['pnl']:+,.2f}\" if s.get('pnl') is not None else 'open'}")
+                         f"P&L {pnl_str}")
                 with st.expander(label):
                     st.dataframe(pd.DataFrame(fills), use_container_width=True, hide_index=True)
         else:
