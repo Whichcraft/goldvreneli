@@ -1,7 +1,11 @@
 import os
+import time
 import streamlit as st
 import plotly.graph_objects as go
 import pandas as pd
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ── Config ────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Goldvreneli Trading", layout="wide")
@@ -18,10 +22,11 @@ with st.sidebar:
             st.warning("Enter your Alpaca paper API keys.")
             st.stop()
     else:
-        ibkr_host = st.text_input("TWS Host", value="127.0.0.1")
-        ibkr_port = st.number_input("Port", value=7497, help="Paper: 7497 (TWS) or 4002 (Gateway)")
+        ibkr_user = st.text_input("IBKR Username", value=os.environ.get("IBKR_USERNAME", ""))
+        ibkr_pass = st.text_input("IBKR Password", value=os.environ.get("IBKR_PASSWORD", ""), type="password")
+        trading_mode = st.selectbox("Mode", ["paper", "live"])
         ibkr_client_id = st.number_input("Client ID", value=1)
-        st.caption("Paper: port 7497 (TWS) or 4002 (IB Gateway)")
+        st.caption("Paper port: 4002 | Live port: 4001")
 
 # ── Alpaca helpers ────────────────────────────────────────────────────────────
 @st.cache_resource
@@ -33,12 +38,21 @@ def get_alpaca_clients(api_key, secret_key):
     return trading, data
 
 # ── IBKR helpers ──────────────────────────────────────────────────────────────
-@st.cache_resource
-def get_ibkr_client(host, port, client_id):
-    from ib_async import IB
-    ib = IB()
-    ib.connect(host, port, clientId=client_id)
-    return ib
+def get_gateway():
+    if "gateway" not in st.session_state:
+        from gateway_manager import GatewayManager
+        st.session_state.gateway = GatewayManager(
+            username=ibkr_user,
+            password=ibkr_pass,
+            trading_mode=trading_mode,
+        )
+    return st.session_state.gateway
+
+def get_ib():
+    if "ib" not in st.session_state or not st.session_state.ib.isConnected():
+        from ib_async import IB
+        st.session_state.ib = IB()
+    return st.session_state.ib
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ALPACA DASHBOARD
@@ -99,7 +113,7 @@ if broker == "Alpaca (Paper)":
 
     # Price chart
     st.subheader("Price Chart")
-    chart_symbol = st.text_input("Symbol", value="AAPL").upper()
+    chart_symbol  = st.text_input("Symbol", value="AAPL").upper()
     timeframe_opt = st.selectbox("Timeframe", ["1D", "1W", "1M", "3M"], index=2)
     tf_map   = {"1D": (1,  TimeFrame.Hour), "1W": (7,  TimeFrame.Hour),
                 "1M": (30, TimeFrame.Day),  "3M": (90, TimeFrame.Day)}
@@ -180,17 +194,77 @@ if broker == "Alpaca (Paper)":
 else:
     from ib_async import Stock, MarketOrder, LimitOrder, util
 
-    try:
-        ib = get_ibkr_client(ibkr_host, int(ibkr_port), int(ibkr_client_id))
-    except Exception as e:
-        st.error(f"IBKR connection failed: {e}\n\nMake sure TWS or IB Gateway is running and API access is enabled.")
+    if not ibkr_user or not ibkr_pass:
+        st.warning("Enter IBKR credentials in the sidebar.")
         st.stop()
 
-    st.title(f"Portfolio Dashboard (IBKR — port {int(ibkr_port)})")
+    gw = get_gateway()
+    ib = get_ib()
 
-    # Account summary
+    api_port = 4002 if trading_mode == "paper" else 4001
+
+    # ── Gateway control panel ─────────────────────────────────────────────────
+    st.title(f"Portfolio Dashboard (IBKR {'Paper' if trading_mode == 'paper' else 'Live'})")
+
+    with st.container(border=True):
+        st.subheader("Gateway")
+        gw_running  = gw.is_running()
+        api_open    = gw.api_port_open()
+        ib_connected = ib.isConnected()
+
+        s1, s2, s3 = st.columns(3)
+        s1.metric("Process",    "Running" if gw_running  else "Stopped",
+                  delta_color="normal" if gw_running  else "inverse")
+        s2.metric("API Port",   "Open"    if api_open    else "Closed",
+                  delta_color="normal" if api_open    else "inverse")
+        s3.metric("IB Session", "Connected" if ib_connected else "Disconnected",
+                  delta_color="normal" if ib_connected else "inverse")
+
+        c1, c2, c3, c4 = st.columns(4)
+
+        if c1.button("Start Gateway", disabled=gw_running):
+            with st.spinner("Starting IB Gateway via IBC…"):
+                gw.start()
+            with st.spinner("Waiting for API port (up to 90s)…"):
+                ready = gw.wait_for_api(timeout=90)
+            if ready:
+                st.success("Gateway ready.")
+            else:
+                st.error("Timed out. Check logs below.")
+            st.rerun()
+
+        if c2.button("Connect", disabled=(not api_open or ib_connected)):
+            try:
+                ib.connect("127.0.0.1", api_port, clientId=int(ibkr_client_id))
+                st.success("Connected.")
+            except Exception as e:
+                st.error(f"Connection failed: {e}")
+            st.rerun()
+
+        if c3.button("Disconnect", disabled=not ib_connected):
+            ib.disconnect()
+            st.info("Disconnected.")
+            st.rerun()
+
+        if c4.button("Stop Gateway", disabled=not gw_running):
+            if ib_connected:
+                ib.disconnect()
+            gw.stop()
+            st.info("Gateway stopped.")
+            st.rerun()
+
+        with st.expander("Gateway Logs"):
+            st.code(gw.get_logs())
+
+    if not ib_connected:
+        st.info("Start and connect to IB Gateway to see your portfolio.")
+        st.stop()
+
+    st.divider()
+
+    # ── Account summary ───────────────────────────────────────────────────────
     summary = ib.accountSummary()
-    tags = {v.tag: v.value for v in summary}
+    tags = {v.tag: v.value for v in summary if v.currency in ("USD", "")}
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Net Liquidation",  f"${float(tags.get('NetLiquidation', 0)):,.2f}")
@@ -200,16 +274,16 @@ else:
 
     st.divider()
 
-    # Positions
+    # ── Positions ─────────────────────────────────────────────────────────────
     st.subheader("Open Positions")
     positions = ib.positions()
     if positions:
         pos_data = [{
-            "Symbol":     p.contract.symbol,
-            "SecType":    p.contract.secType,
-            "Exchange":   p.contract.exchange,
-            "Qty":        p.position,
-            "Avg Cost":   f"${p.avgCost:.2f}",
+            "Symbol":   p.contract.symbol,
+            "SecType":  p.contract.secType,
+            "Exchange": p.contract.exchange,
+            "Qty":      p.position,
+            "Avg Cost": f"${p.avgCost:.2f}",
         } for p in positions]
         st.dataframe(pd.DataFrame(pos_data), use_container_width=True, hide_index=True)
 
@@ -226,11 +300,11 @@ else:
 
     st.divider()
 
-    # Place Order
+    # ── Place Order ───────────────────────────────────────────────────────────
     st.subheader("Place Order")
     with st.form("ibkr_order_form"):
         c1, c2, c3, c4, c5, c6 = st.columns(6)
-        sym        = c1.text_input("Symbol", value="AAPL").upper()
+        sym        = c1.text_input("Symbol",   value="AAPL").upper()
         exchange   = c2.text_input("Exchange", value="SMART")
         currency   = c3.text_input("Currency", value="USD")
         side       = c4.selectbox("Side", ["BUY", "SELL"])
@@ -243,11 +317,8 @@ else:
     if submitted:
         try:
             contract = Stock(sym, exchange, currency)
-            if order_type == "Market":
-                order = MarketOrder(side, qty)
-            else:
-                order = LimitOrder(side, qty, limit_px)
-            trade = ib.placeOrder(contract, order)
+            order    = MarketOrder(side, qty) if order_type == "Market" else LimitOrder(side, qty, limit_px)
+            trade    = ib.placeOrder(contract, order)
             ib.sleep(1)
             st.success(f"Order placed — Status: {trade.orderStatus.status}")
         except Exception as e:
@@ -255,17 +326,17 @@ else:
 
     st.divider()
 
-    # Open Orders
+    # ── Open Orders ───────────────────────────────────────────────────────────
     st.subheader("Open Orders")
     open_trades = ib.openTrades()
     if open_trades:
         st.dataframe(pd.DataFrame([{
-            "Symbol":   t.contract.symbol,
-            "Side":     t.order.action,
-            "Type":     t.order.orderType,
-            "Qty":      t.order.totalQuantity,
-            "Filled":   t.orderStatus.filled,
-            "Status":   t.orderStatus.status,
+            "Symbol": t.contract.symbol,
+            "Side":   t.order.action,
+            "Type":   t.order.orderType,
+            "Qty":    t.order.totalQuantity,
+            "Filled": t.orderStatus.filled,
+            "Status": t.orderStatus.status,
         } for t in open_trades]), use_container_width=True, hide_index=True)
 
         if st.button("Cancel All Orders", type="secondary"):
