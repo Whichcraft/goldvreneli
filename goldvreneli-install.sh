@@ -18,6 +18,7 @@ PROD_FILES=(
     app.py
     autotrader.py
     scanner.py
+    replay.py
     gateway_manager.py
     version.py
     requirements.txt
@@ -253,8 +254,8 @@ do_update() {
             cd "$INSTALL_DIR"
             venv/bin/pip install --quiet --upgrade pip
             venv/bin/pip install --quiet -r requirements.txt
-            info "Checking for IB Gateway updates…"
-            install_ib_gateway
+            # Only update IB Gateway if it was previously installed here
+            ls "$GATEWAY_DIR"/*/ibgateway &>/dev/null 2>&1 && { info "Checking for IB Gateway updates…"; install_ib_gateway; } || true
             echo ""
             echo -e "${GREEN}Update complete — now at v${NEW_VERSION}.${NC}"
             echo "  Restart the app: streamlit run $INSTALL_DIR/app.py"
