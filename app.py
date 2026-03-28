@@ -7,12 +7,15 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from version import __version__
+
 # ── Config ────────────────────────────────────────────────────────────────────
-st.set_page_config(page_title="Goldvreneli Trading", layout="wide")
+st.set_page_config(page_title=f"Goldvreneli Trading v{__version__}", layout="wide")
 
 # ── Sidebar: broker selection ─────────────────────────────────────────────────
 with st.sidebar:
     st.title("Goldvreneli")
+    st.caption(f"v{__version__}")
     broker = st.radio("Broker", ["Alpaca (Paper)", "IBKR"])
 
     if broker == "Alpaca (Paper)":
