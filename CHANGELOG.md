@@ -8,6 +8,10 @@ All notable changes to this project will be documented here.
 
 ---
 
+## [0.5.0] — 2026-03-28
+
+---
+
 ## [0.4.0] — 2026-03-28
 
 ### Added
