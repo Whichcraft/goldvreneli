@@ -236,6 +236,36 @@ do_update() {
     require_cmd git
     require_cmd curl
 
+    CUR_VERSION="$(grep -oP '(?<=__version__ = ")[^"]+' "$INSTALL_DIR/version.py" 2>/dev/null || echo "unknown")"
+
+    # ── Fast path: git pull if install dir is already a repo ──────────────
+    if git -C "$INSTALL_DIR" rev-parse --is-inside-work-tree &>/dev/null; then
+        info "Installation is a git repo — trying git pull…"
+        if git -C "$INSTALL_DIR" pull --ff-only origin main 2>/dev/null; then
+            NEW_VERSION="$(grep -oP '(?<=__version__ = ")[^"]+' "$INSTALL_DIR/version.py" 2>/dev/null || echo "unknown")"
+            if [[ "$NEW_VERSION" == "$CUR_VERSION" ]]; then
+                success "Already up to date (v$CUR_VERSION)."
+            else
+                success "Pulled v$CUR_VERSION → v$NEW_VERSION"
+            fi
+            # Skip the clone-and-deploy path
+            info "Updating Python dependencies…"
+            cd "$INSTALL_DIR"
+            venv/bin/pip install --quiet --upgrade pip
+            venv/bin/pip install --quiet -r requirements.txt
+            info "Checking for IB Gateway updates…"
+            install_ib_gateway
+            echo ""
+            echo -e "${GREEN}Update complete — now at v${NEW_VERSION}.${NC}"
+            echo "  Restart the app: streamlit run $INSTALL_DIR/app.py"
+            echo ""
+            return
+        else
+            warn "git pull failed (diverged or no remote) — falling back to fresh clone."
+        fi
+    fi
+
+    # ── Fallback: clone main and deploy prod files ─────────────────────────
     TMP_REPO="$(mktemp -d /tmp/goldvreneli-update-XXXXXX)"
     trap "rm -rf $TMP_REPO" EXIT
 
@@ -244,7 +274,6 @@ do_update() {
         git clone --depth 1 "$REPO_URL" "$TMP_REPO"
 
     NEW_VERSION="$(grep -oP '(?<=__version__ = ")[^"]+' "$TMP_REPO/version.py" 2>/dev/null || echo "unknown")"
-    CUR_VERSION="$(grep -oP '(?<=__version__ = ")[^"]+' "$INSTALL_DIR/version.py" 2>/dev/null || echo "unknown")"
 
     if [[ "$NEW_VERSION" == "$CUR_VERSION" ]]; then
         success "Already up to date (v$CUR_VERSION)."
