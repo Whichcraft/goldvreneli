@@ -192,7 +192,7 @@ if broker == "Alpaca (Paper)":
     from alpaca.trading.enums import OrderSide, TimeInForce, QueryOrderStatus
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, time as dtime
 
     api_key    = env_get("ALPACA_PAPER_API_KEY")
     secret_key = env_get("ALPACA_PAPER_SECRET_KEY")
@@ -625,15 +625,44 @@ if broker == "Alpaca (Paper)":
 
         if feed_type.startswith("Replay"):
             fc1, fc2, fc3 = st.columns(3)
-            bt_symbol  = fc1.text_input("Symbol", value="AAPL").upper()
-            bt_date    = fc2.date_input("Date", value=datetime(2024, 11, 15).date(),
-                                         help="Must be a trading day (Mon–Fri, non-holiday)")
-            bt_speed   = fc3.number_input("Speed (×)", min_value=1, max_value=10000,
-                                           value=200, step=50,
-                                           help="200 = 200× real-time. Recommended poll interval = 60 / speed.")
-            bt_poll    = round(60.0 / bt_speed, 3)
-            st.caption(f"Recommended poll interval at {bt_speed}×: **{bt_poll}s** "
-                       f"({len([])} bars loaded — click Start to fetch)")
+            bt_symbol = fc1.text_input("Symbol", value="AAPL").upper()
+            bt_date   = fc2.date_input("Date", value=datetime(2024, 11, 15).date(),
+                                        help="Must be a trading day (Mon–Fri, non-holiday)")
+            bt_speed  = fc3.number_input("Speed (×)", min_value=1, max_value=10000,
+                                          value=200, step=50,
+                                          help="200 = 200× real-time. Recommended poll interval = 60 / speed.")
+            bt_poll   = round(60.0 / bt_speed, 3)
+
+            # ── Time window ───────────────────────────────────────────────
+            tr_mode = st.radio("Time window (ET)", ["Full day", "Duration", "Custom range"],
+                               horizontal=True)
+            bt_start_time = bt_end_time = bt_duration_hours = None
+
+            if tr_mode == "Duration":
+                trc1, trc2 = st.columns(2)
+                _st = trc1.time_input("Start time (ET)", value=dtime(9, 30))
+                bt_start_time = _st
+                bt_duration_hours = trc2.select_slider(
+                    "Duration",
+                    options=[0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 6.0, 6.5],
+                    value=2.0,
+                    format_func=lambda x: f"{x:g}h",
+                )
+                end_dt = datetime(2000, 1, 1, _st.hour, _st.minute) + timedelta(hours=bt_duration_hours)
+                st.caption(f"Replaying {bt_duration_hours:g}h from "
+                           f"{_st.strftime('%H:%M')} → {end_dt.strftime('%H:%M')} ET  |  "
+                           f"≈{int(bt_duration_hours * 60)} bars  |  "
+                           f"poll {bt_poll}s")
+            elif tr_mode == "Custom range":
+                trc1, trc2 = st.columns(2)
+                bt_start_time = trc1.time_input("Start time (ET)", value=dtime(9, 30))
+                bt_end_time   = trc2.time_input("End time (ET)",   value=dtime(11, 30))
+                dur_m = (datetime.combine(datetime.today(), bt_end_time)
+                         - datetime.combine(datetime.today(), bt_start_time)).seconds // 60
+                st.caption(f"{bt_start_time.strftime('%H:%M')} → {bt_end_time.strftime('%H:%M')} ET  |  "
+                           f"≈{dur_m} bars  |  poll {bt_poll}s")
+            else:
+                st.caption(f"Full trading day  |  poll {bt_poll}s")
         else:
             sc1, sc2, sc3, sc4 = st.columns(4)
             bt_symbol   = sc1.text_input("Symbol (label only)", value="SIM").upper()
@@ -689,13 +718,20 @@ if broker == "Alpaca (Paper)":
                         data_client,
                         bt_symbol,
                         str(bt_date),
-                        speed=float(bt_speed),
+                        speed          = float(bt_speed),
+                        start_time     = bt_start_time,
+                        end_time       = bt_end_time,
+                        duration_hours = bt_duration_hours,
                     )
                     poll_iv = feed.recommended_poll_interval
                     meta = {
-                        "feed": "replay", "symbol": bt_symbol,
-                        "date": str(bt_date), "speed": bt_speed,
-                        "bars": feed.bar_count,
+                        "feed":     "replay",
+                        "symbol":   bt_symbol,
+                        "date":     str(bt_date),
+                        "speed":    bt_speed,
+                        "bars":     feed.bar_count,
+                        "window":   (f"{bt_start_time.strftime('%H:%M') if bt_start_time else 'open'}"
+                                     f"–{bt_end_time.strftime('%H:%M') if bt_end_time else 'close'} ET"),
                     }
                 else:
                     feed = SyntheticPriceFeed(

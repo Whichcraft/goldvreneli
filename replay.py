@@ -31,7 +31,7 @@ import math
 import random
 import threading
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, time as dtime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -44,40 +44,55 @@ class ReplayPriceFeed:
 
     Parameters
     ----------
-    data_client  : Alpaca StockHistoricalDataClient
-    symbol       : ticker, e.g. "AAPL"
-    replay_date  : "YYYY-MM-DD" — must be a trading day
-    speed        : replay speed multiplier relative to real time.
-                   Use recommended_poll_interval as the AutoTrader poll_interval.
+    data_client     : Alpaca StockHistoricalDataClient
+    symbol          : ticker, e.g. "AAPL"
+    replay_date     : "YYYY-MM-DD" — must be a trading day
+    speed           : replay speed multiplier relative to real time.
+                      Use recommended_poll_interval as the AutoTrader poll_interval.
+    start_time      : datetime.time in ET — first bar to include (default: full day)
+    end_time        : datetime.time in ET — last bar to include
+    duration_hours  : if given together with start_time, sets end_time automatically
+                      (takes precedence over an explicit end_time)
     """
 
     def __init__(
         self,
         data_client,
-        symbol:      str,
-        replay_date: str,
-        speed:       float = 100.0,
+        symbol:         str,
+        replay_date:    str,
+        speed:          float          = 100.0,
+        start_time:     Optional[dtime] = None,
+        end_time:       Optional[dtime] = None,
+        duration_hours: Optional[float] = None,
     ):
-        self.symbol      = symbol.upper()
-        self.speed       = speed
-        self._prices:    List[float] = []
-        self._times:     List[str]   = []
-        self._idx        = 0
-        self._lock       = threading.Lock()
-        self._fetch(data_client, replay_date)
+        self.symbol = symbol.upper()
+        self.speed  = speed
 
-    def _fetch(self, data_client, replay_date: str):
+        # Resolve end_time from duration
+        if duration_hours is not None and start_time is not None:
+            dummy  = datetime(2000, 1, 1, start_time.hour, start_time.minute)
+            end_dt = dummy + timedelta(hours=duration_hours)
+            end_time = end_dt.time()
+
+        self._prices: List[float] = []
+        self._times:  List[str]   = []
+        self._idx     = 0
+        self._lock    = threading.Lock()
+        self._fetch(data_client, replay_date, start_time, end_time)
+
+    def _fetch(self, data_client, replay_date: str,
+               start_time: Optional[dtime], end_time: Optional[dtime]):
         from alpaca.data.requests import StockBarsRequest
         from alpaca.data.timeframe import TimeFrame
 
-        start = datetime.strptime(replay_date, "%Y-%m-%d")
-        end   = start + timedelta(days=1)
+        day_start = datetime.strptime(replay_date, "%Y-%m-%d")
+        day_end   = day_start + timedelta(days=1)
 
         req  = StockBarsRequest(
             symbol_or_symbols=self.symbol,
             timeframe=TimeFrame.Minute,
-            start=start,
-            end=end,
+            start=day_start,
+            end=day_end,
         )
         bars = data_client.get_stock_bars(req).df
         if bars.empty:
@@ -86,6 +101,29 @@ class ReplayPriceFeed:
                 "Choose a trading day (Mon–Fri, non-holiday)."
             )
         bars = bars.reset_index(level=0, drop=True).sort_index()
+
+        # ── Time-window filter (convert UTC index → ET for comparison) ────────
+        if start_time is not None or end_time is not None:
+            try:
+                et_index = bars.index.tz_convert("America/New_York")
+            except TypeError:
+                # Index is tz-naive — assume UTC then convert
+                et_index = bars.index.tz_localize("UTC").tz_convert("America/New_York")
+            bar_times = et_index.time
+            mask = [True] * len(bars)
+            if start_time is not None:
+                mask = [m and t >= start_time for m, t in zip(mask, bar_times)]
+            if end_time is not None:
+                mask = [m and t <= end_time   for m, t in zip(mask, bar_times)]
+            bars = bars[mask]
+            if bars.empty:
+                st_str = start_time.strftime("%H:%M") if start_time else "open"
+                et_str = end_time.strftime("%H:%M")   if end_time   else "close"
+                raise ValueError(
+                    f"No bars found for {self.symbol} on {replay_date} "
+                    f"between {st_str} and {et_str} ET."
+                )
+
         self._prices = bars["close"].tolist()
         self._times  = [str(ts) for ts in bars.index.tolist()]
 
