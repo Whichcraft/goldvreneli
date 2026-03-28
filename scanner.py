@@ -1,19 +1,29 @@
 """
-Position Scanner — finds 10 good long candidates using technical filters.
+Position Scanner — finds top long candidates using technical filters.
 
-Filters applied per symbol:
-  - Price above 20-day and 50-day SMA  (uptrend)
-  - RSI(14) between 40 and 65          (momentum, not overbought)
-  - Volume > 1.5× 20-day avg volume    (interest/participation)
-  - Price > $5 and ADV > $5M           (liquidity)
-  - 5-day return > 0                   (recent positive momentum)
+Filters (all must pass):
+  - Liquidity    : Price > $5, ADV > $5M
+  - Trend        : Price within 3% of SMA20, above SMA50
+  - RSI(14)      : 35 – 72  (not oversold, not overbought)
+  - Volume       : last-day volume ≥ 20-day average (participation)
+  - Momentum     : 5-day return > −1%  (not in freefall)
 
+Scoring (higher = better):
+  - Relative strength vs SPY (5d, 20d)
+  - Absolute momentum (1d, 5d, 10d, 20d returns)
+  - RSI quality (prefer 50–65)
+  - MACD histogram positive
+  - ATR% (prefer moderate volatility)
+  - Trend consistency (SMA20 > SMA50 slope)
+
+Fetch: 90 days of daily bars; parallelised with ThreadPoolExecutor.
 Uses Alpaca market data (free, no funded account needed).
 """
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Dict, Optional
 
 import pandas as pd
 import pandas_ta as ta
@@ -150,7 +160,7 @@ UNIVERSE = [
 UNIVERSE = list(dict.fromkeys(UNIVERSE))
 
 
-def fetch_bars(data_client, symbol: str, days: int = 60,
+def fetch_bars(data_client, symbol: str, days: int = 90,
                as_of: Optional[datetime] = None) -> Optional[pd.DataFrame]:
     """Fetch daily bars for a symbol using Alpaca data client."""
     from alpaca.data.requests import StockBarsRequest
@@ -174,59 +184,82 @@ def fetch_bars(data_client, symbol: str, days: int = 60,
         return None
 
 
-def score_symbol(bars: pd.DataFrame) -> dict:
+def score_symbol(bars: pd.DataFrame,
+                 spy_rets: Optional[Dict[str, float]] = None) -> dict:
     """
     Compute technical indicators and return a score dict.
     Returns None if the symbol fails any hard filter.
+
+    spy_rets: dict with keys "5d", "20d" holding SPY returns for RS calculation.
     """
     if len(bars) < 52:
         return None
 
-    close  = bars["close"]
-    volume = bars["volume"]
-    high   = bars["high"]
-    low    = bars["low"]
+    close     = bars["close"]
+    volume    = bars["volume"]
+    high      = bars["high"]
+    low       = bars["low"]
 
     # ── Indicators ────────────────────────────────────────────────────────────
-    sma20  = ta.sma(close, length=20).iloc[-1]
-    sma50  = ta.sma(close, length=50).iloc[-1]
-    rsi    = ta.rsi(close, length=14).iloc[-1]
+    sma20     = ta.sma(close, length=20).iloc[-1]
+    sma50     = ta.sma(close, length=50).iloc[-1]
+    sma20_prev = ta.sma(close, length=20).iloc[-6]   # slope check
+    rsi       = ta.rsi(close, length=14).iloc[-1]
     avg_vol20 = volume.rolling(20).mean().iloc[-1]
-    atr    = ta.atr(high, low, close, length=14).iloc[-1]
-    macd_df = ta.macd(close)
+    atr       = ta.atr(high, low, close, length=14).iloc[-1]
+    macd_df   = ta.macd(close)
     macd_hist = macd_df["MACDh_12_26_9"].iloc[-1] if macd_df is not None else 0
 
-    last_price  = close.iloc[-1]
-    ret_5d      = (last_price / close.iloc[-6] - 1) * 100  if len(close) > 6 else 0
-    ret_20d     = (last_price / close.iloc[-21] - 1) * 100 if len(close) > 21 else 0
-    adv         = last_price * avg_vol20  # avg daily $ volume
+    last_price = close.iloc[-1]
+    ret_1d  = (last_price / close.iloc[-2]  - 1) * 100 if len(close) > 2  else 0
+    ret_5d  = (last_price / close.iloc[-6]  - 1) * 100 if len(close) > 6  else 0
+    ret_10d = (last_price / close.iloc[-11] - 1) * 100 if len(close) > 11 else 0
+    ret_20d = (last_price / close.iloc[-21] - 1) * 100 if len(close) > 21 else 0
+    adv     = last_price * avg_vol20
+    atr_pct = (atr / last_price) * 100
 
     # ── Hard filters ──────────────────────────────────────────────────────────
-    if last_price < 5:               return None   # penny stock
-    if adv < 5_000_000:             return None   # illiquid
-    if last_price < sma20:          return None   # below 20 SMA
-    if last_price < sma50:          return None   # below 50 SMA
-    if not (40 <= rsi <= 65):       return None   # overbought or weak
-    if volume.iloc[-1] < avg_vol20 * 1.5: return None  # low participation
-    if ret_5d <= 0:                 return None   # no recent momentum
+    if last_price < 5:                          return None  # penny stock
+    if adv < 5_000_000:                         return None  # illiquid
+    if last_price < sma50:                      return None  # below 50 SMA
+    if last_price < sma20 * 0.97:               return None  # > 3% below 20 SMA
+    if not (35 <= rsi <= 72):                   return None  # overbought or weak
+    if volume.iloc[-1] < avg_vol20:             return None  # below-avg participation
+    if ret_5d < -1.0:                           return None  # freefall
+
+    # ── Relative strength vs SPY ───────────────────────────────────────────
+    spy = spy_rets or {}
+    rs_5d  = ret_5d  - spy.get("5d",  0)
+    rs_20d = ret_20d - spy.get("20d", 0)
+
+    # ── Trend consistency ──────────────────────────────────────────────────
+    sma_slope = (sma20 - sma20_prev) / sma20_prev * 100 if sma20_prev else 0
+    above_both = 1 if last_price > sma20 and sma20 > sma50 else 0
 
     # ── Composite score (higher = better) ────────────────────────────────────
     score = (
-        ret_5d * 2          # recent momentum
-        + ret_20d * 0.5     # medium-term trend
-        + (rsi - 40) * 0.3  # RSI quality (prefer 50–65)
-        + (macd_hist > 0) * 5  # MACD histogram positive bonus
+        rs_5d  * 3.0           # relative strength last 5 days (most important)
+        + rs_20d * 1.0         # relative strength last 20 days
+        + ret_5d * 1.0         # absolute 5d momentum
+        + ret_10d * 0.5        # 10d momentum
+        + ret_20d * 0.3        # 20d trend
+        + ret_1d * 0.5         # yesterday's action
+        + (rsi - 50) * 0.2     # RSI quality (prefer 50–65)
+        + (macd_hist > 0) * 4  # MACD histogram positive
+        + above_both * 3       # clean uptrend structure
+        + sma_slope * 0.5      # SMA rising
+        - max(0, atr_pct - 3) * 0.5  # penalise excessive volatility
     )
 
     return {
         "Price":      round(last_price, 2),
-        "SMA20":      round(sma20, 2),
-        "SMA50":      round(sma50, 2),
         "RSI":        round(rsi, 1),
+        "1d Ret%":    round(ret_1d, 2),
         "5d Ret%":    round(ret_5d, 2),
         "20d Ret%":   round(ret_20d, 2),
+        "RS vs SPY":  round(rs_5d, 2),
         "Vol/Avg":    round(volume.iloc[-1] / avg_vol20, 2),
-        "ATR":        round(atr, 2),
+        "ATR%":       round(atr_pct, 2),
         "MACD+":      macd_hist > 0,
         "ADV $M":     round(adv / 1_000_000, 1),
         "_score":     round(score, 2),
@@ -234,27 +267,50 @@ def score_symbol(bars: pd.DataFrame) -> dict:
 
 
 def scan(data_client, top_n: int = 10, progress_cb=None,
-         as_of: Optional[datetime] = None) -> pd.DataFrame:
+         as_of: Optional[datetime] = None,
+         workers: int = 20) -> pd.DataFrame:
     """
     Scan UNIVERSE, apply filters, return top_n candidates sorted by score.
 
     progress_cb : optional callable(done, total) for progress updates
     as_of       : if set, fetch bars ending on this date (historical mode)
+    workers     : parallel fetch threads
     """
+    symbols = UNIVERSE
+    total   = len(symbols)
+    done    = 0
+
+    # ── Fetch SPY for relative-strength baseline ───────────────────────────
+    spy_bars = fetch_bars(data_client, "SPY", as_of=as_of)
+    spy_rets: Dict[str, float] = {}
+    if spy_bars is not None and len(spy_bars) > 21:
+        c = spy_bars["close"]
+        spy_rets["5d"]  = (c.iloc[-1] / c.iloc[-6]  - 1) * 100 if len(c) > 6  else 0
+        spy_rets["20d"] = (c.iloc[-1] / c.iloc[-21] - 1) * 100 if len(c) > 21 else 0
+
+    # ── Parallel fetch ─────────────────────────────────────────────────────
+    bars_map: Dict[str, pd.DataFrame] = {}
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(fetch_bars, data_client, sym, 90, as_of): sym
+                   for sym in symbols}
+        for fut in as_completed(futures):
+            sym = futures[fut]
+            done += 1
+            if progress_cb:
+                progress_cb(done, total)
+            try:
+                result = fut.result()
+                if result is not None:
+                    bars_map[sym] = result
+            except Exception:
+                pass
+
+    # ── Score ──────────────────────────────────────────────────────────────
     results = []
-    total = len(UNIVERSE)
-
-    for i, symbol in enumerate(UNIVERSE):
-        if progress_cb:
-            progress_cb(i + 1, total)
-
-        bars = fetch_bars(data_client, symbol, as_of=as_of)
-        if bars is None:
-            continue
-
-        scored = score_symbol(bars)
+    for sym, bars in bars_map.items():
+        scored = score_symbol(bars, spy_rets)
         if scored:
-            scored["Symbol"] = symbol
+            scored["Symbol"] = sym
             results.append(scored)
 
     if not results:
