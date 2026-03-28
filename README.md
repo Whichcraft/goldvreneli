@@ -240,7 +240,8 @@ git push && git push --tags
 
 ```
 goldvreneli/
-├── goldvreneli.py          # Streamlit dashboard (all pages)
+├── goldvreneli.py          # Streamlit UI (all pages)
+├── core.py                 # Framework-agnostic core: credentials, client cache, session factories
 ├── autotrader.py           # AutoTrader + MultiTrader logic
 ├── scanner.py              # Technical position scanner
 ├── replay.py               # ReplayPriceFeed, SyntheticPriceFeed, MockBroker

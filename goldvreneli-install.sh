@@ -16,6 +16,7 @@ GATEWAY_URL="https://download2.interactivebrokers.com/installers/ibgateway/stabl
 # Production files only — no dev files deployed
 PROD_FILES=(
     goldvreneli.py
+    core.py
     autotrader.py
     scanner.py
     replay.py

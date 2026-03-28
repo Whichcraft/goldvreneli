@@ -1,13 +1,16 @@
-import os
 import time
 import streamlit as st
 import plotly.graph_objects as go
 import pandas as pd
-from dotenv import load_dotenv, dotenv_values, set_key
-
-load_dotenv()
 
 from version import __version__
+from core import (
+    INSTALL_DIR, ENV_FILE,
+    env_get, env_save,
+    get_alpaca_clients, clear_alpaca_cache,
+    get_gateway, get_ib,
+    get_multi_trader,
+)
 from autotrader import (
     AutoTrader, MultiTrader, TraderConfig, TraderState,
     StopMode, EntryMode, size_from_risk,
@@ -15,23 +18,8 @@ from autotrader import (
 from replay import ReplayPriceFeed, SyntheticPriceFeed, MockBroker, load_sessions
 from scanner import scan, ScanFilters, UNIVERSE
 
-INSTALL_DIR = os.path.dirname(os.path.abspath(__file__))
-ENV_FILE    = os.path.join(INSTALL_DIR, ".env")
-
 # ── Config ────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title=f"Goldvreneli Trading v{__version__}", layout="wide")
-
-# ── .env helpers ──────────────────────────────────────────────────────────────
-def env_get(key: str, default: str = "") -> str:
-    return os.environ.get(key, dotenv_values(ENV_FILE).get(key, default))
-
-def env_save(values: dict):
-    """Write multiple key=value pairs to .env and reload into os.environ."""
-    if not os.path.exists(ENV_FILE):
-        open(ENV_FILE, "w").close()
-    for k, v in values.items():
-        set_key(ENV_FILE, k, v)
-        os.environ[k] = v
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -65,31 +53,12 @@ with st.sidebar:
     st.divider()
     st.caption("Alpaca Paper · IBKR · MIT License")
 
-# ── Alpaca helpers ────────────────────────────────────────────────────────────
-@st.cache_resource
-def get_alpaca_clients(api_key, secret_key):
-    from alpaca.trading.client import TradingClient
-    from alpaca.data.historical import StockHistoricalDataClient
-    trading = TradingClient(api_key=api_key, secret_key=secret_key, paper=True)
-    data    = StockHistoricalDataClient(api_key=api_key, secret_key=secret_key)
-    return trading, data
+# ── IBKR session helpers (thin wrappers that bind st.session_state) ───────────
+def _get_gateway(ibkr_user, ibkr_pass, trading_mode):
+    return get_gateway(st.session_state, ibkr_user, ibkr_pass, trading_mode)
 
-# ── IBKR helpers ──────────────────────────────────────────────────────────────
-def get_gateway(ibkr_user, ibkr_pass, trading_mode):
-    if "gateway" not in st.session_state:
-        from gateway_manager import GatewayManager
-        st.session_state.gateway = GatewayManager(
-            username=ibkr_user,
-            password=ibkr_pass,
-            trading_mode=trading_mode,
-        )
-    return st.session_state.gateway
-
-def get_ib():
-    if "ib" not in st.session_state or not st.session_state.ib.isConnected():
-        from ib_async import IB
-        st.session_state.ib = IB()
-    return st.session_state.ib
+def _get_ib():
+    return get_ib(st.session_state)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SETTINGS PAGE (shared by both brokers)
@@ -189,7 +158,7 @@ if page == "Settings":
             "SCAN_WATCHLIST":          f_scan_watchlist,
         })
         # Clear cached clients so they reconnect with new keys
-        get_alpaca_clients.clear()
+        clear_alpaca_cache()
         # Reset IBKR auto-start flags so gateway restarts with new credentials
         st.session_state.pop("gw_start_attempted", None)
         st.session_state.pop("ib_connect_attempted", None)
@@ -562,15 +531,8 @@ if broker == "Alpaca (Paper)":
         if "autotrader" in st.session_state and "multitrader" not in st.session_state:
             del st.session_state["autotrader"]
 
-        if "multitrader" not in st.session_state:
-            st.session_state.multitrader = MultiTrader(
-                get_price        = alpaca_get_price,
-                place_buy        = alpaca_buy,
-                place_sell       = alpaca_sell,
-                get_bars         = alpaca_get_bars,
-                daily_loss_limit = float(env_get("AT_DAILY_LOSS_LIMIT", "0")),
-            )
-        mt = st.session_state.multitrader
+        mt = get_multi_trader(st.session_state,
+                              alpaca_get_price, alpaca_buy, alpaca_sell, alpaca_get_bars)
 
         # ── New position form ─────────────────────────────────────────────
         # Handle multi-symbol prefill from Scanner
@@ -1195,8 +1157,8 @@ else:
         st.warning("IBKR credentials not configured. Go to **Settings** to add them.")
         st.stop()
 
-    gw = get_gateway(ibkr_user, ibkr_pass, trading_mode)
-    ib = get_ib()
+    gw = _get_gateway(ibkr_user, ibkr_pass, trading_mode)
+    ib = _get_ib()
     api_port = 4002 if trading_mode == "paper" else 4001
 
     # ── Auto-start gateway and connect when credentials are present ───────────
