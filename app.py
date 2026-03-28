@@ -166,6 +166,11 @@ if page == "Settings":
         })
         # Clear cached clients so they reconnect with new keys
         get_alpaca_clients.clear()
+        # Reset IBKR auto-start flags so gateway restarts with new credentials
+        st.session_state.pop("gw_start_attempted", None)
+        st.session_state.pop("ib_connect_attempted", None)
+        if "gateway" in st.session_state:
+            del st.session_state["gateway"]
         st.success("Settings saved to .env")
         st.rerun()
 
@@ -495,6 +500,27 @@ else:
     gw = get_gateway(ibkr_user, ibkr_pass, trading_mode)
     ib = get_ib()
     api_port = 4002 if trading_mode == "paper" else 4001
+
+    # ── Auto-start gateway and connect when credentials are present ───────────
+    if not st.session_state.get("gw_start_attempted"):
+        st.session_state.gw_start_attempted = True
+        if not gw.is_running():
+            with st.spinner("Starting IB Gateway via IBC…"):
+                try:
+                    gw.start()
+                except Exception as e:
+                    st.error(f"Gateway start failed: {e}")
+            with st.spinner("Waiting for API port (up to 90 s)…"):
+                gw.wait_for_api(timeout=90)
+            st.rerun()
+
+    if not ib.isConnected() and gw.api_port_open() and not st.session_state.get("ib_connect_attempted"):
+        st.session_state.ib_connect_attempted = True
+        try:
+            ib.connect("127.0.0.1", api_port, clientId=ibkr_client_id)
+        except Exception:
+            pass
+        st.rerun()
 
     st.title(f"Portfolio Dashboard (IBKR {'Paper' if trading_mode == 'paper' else 'Live'})")
 
