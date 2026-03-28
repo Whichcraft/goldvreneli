@@ -306,7 +306,14 @@ if [[ -n "$TARGET_DIR" ]]; then
 elif [[ "$SCRIPT_DIR" == "$HOME/goldvreneli" ]]; then
     INSTALL_DIR="$SCRIPT_DIR"
 else
-    INSTALL_DIR="$HOME/goldvreneli"
+    DEFAULT_DIR="$HOME/goldvreneli"
+    read -rp "$(echo -e "${CYAN}[INPUT]${NC} Install to $DEFAULT_DIR? [Y/n]: ")" dir_confirm
+    if [[ "$dir_confirm" =~ ^[Nn]$ ]]; then
+        read -rp "$(echo -e "${CYAN}[INPUT]${NC} Enter install path: ")" custom_dir
+        INSTALL_DIR="$(realpath -m "${custom_dir:-$DEFAULT_DIR}")"
+    else
+        INSTALL_DIR="$DEFAULT_DIR"
+    fi
 fi
 
 # All components live under the install directory
