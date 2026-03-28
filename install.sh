@@ -7,8 +7,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_URL="https://github.com/Whichcraft/goldvreneli.git"
-IBC_DIR="$HOME/ibc"
-GATEWAY_DIR="$HOME/Jts/ibgateway"
+# Component paths are set after INSTALL_DIR is resolved (see bottom of script)
+IBC_DIR=""
+GATEWAY_DIR=""
 IBC_RELEASES="https://github.com/IbcAlpha/IBC/releases/latest"
 GATEWAY_URL="https://download2.interactivebrokers.com/installers/ibgateway/stable-standalone/ibgateway-stable-standalone-linux-x64.sh"
 
@@ -307,6 +308,10 @@ elif [[ "$SCRIPT_DIR" == "$HOME/goldvreneli" ]]; then
 else
     INSTALL_DIR="$HOME/goldvreneli"
 fi
+
+# All components live under the install directory
+IBC_DIR="$INSTALL_DIR/ibc"
+GATEWAY_DIR="$INSTALL_DIR/ibgateway"
 
 # ── dispatch ──────────────────────────────────────────────────────────────────
 if $DO_UNINSTALL; then
