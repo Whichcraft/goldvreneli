@@ -8,11 +8,28 @@ All notable changes to this project will be documented here.
 
 ---
 
+## [0.4.0] — 2026-03-28
+
+### Added
+- `autotrader.py` — trailing-stop AutoTrader: buys on start, tracks peak price, sells when drawdown exceeds configurable threshold (default 0.5%)
+- `scanner.py` — position scanner across ~60 liquid US stocks/ETFs using SMA, RSI, volume, momentum, and MACD filters; proposes top N candidates
+- **AutoTrader tab** in Alpaca dashboard: configurable symbol, qty, trailing stop %, poll interval; live status panel with drawdown progress bar and activity log
+- **Scanner tab** in Alpaca dashboard: run-on-demand scan, results table, 5-day return bar chart
+- `pandas-ta` dependency for technical indicators (SMA, RSI, ATR, MACD)
+
+### Changed
+- Alpaca dashboard restructured into three tabs: Portfolio / AutoTrader / Scanner
+
+---
+
 ## [0.3.0] — 2026-03-28
 
 ### Added
 - `install.sh` — one-command installer for system deps, IB Gateway, IBC, Xvfb, and `.env` template
 - `--skip-gateway` and `--skip-ibc` flags for the installer
+- `version.py` — single source of truth for semantic version
+- `bump.sh` — version bump script (major/minor/patch), updates CHANGELOG and creates git tag
+- Version shown in browser tab title and sidebar
 - `README.md` and `CHANGELOG.md`
 
 ---
