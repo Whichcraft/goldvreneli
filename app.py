@@ -868,9 +868,10 @@ if broker == "Alpaca (Paper)":
                 fills = s.get("fills", [])
                 if not fills:
                     continue
+                pnl_str = f"${s['pnl']:+,.2f}" if s.get('pnl') is not None else 'open'
                 label = (f"Session {s.get('id','?')}  "
                          f"{s.get('meta',{}).get('symbol','?')}  "
-                         f"P&L {f\"${s['pnl']:+,.2f}\" if s.get('pnl') is not None else 'open'}")
+                         f"P&L {pnl_str}")
                 with st.expander(label):
                     st.dataframe(pd.DataFrame(fills), use_container_width=True, hide_index=True)
         else:
