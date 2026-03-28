@@ -90,28 +90,42 @@ _gw_latest_version() {
     basename "$url" | grep -oP '(?<=ibgateway-)[\w.]+(?=-standalone)' || true
 }
 
+_gw_version_gt() {
+    # Returns 0 (true) if $1 is strictly greater than $2 using version sort.
+    # Handles alphanumeric suffixes (e.g. 10.19.2h > 10.19.1e).
+    [[ "$1" == "$2" ]] && return 1
+    local highest
+    highest="$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)"
+    [[ "$highest" == "$1" ]]
+}
+
 install_ib_gateway() {
     local GW_VERSION_FILE="$GATEWAY_DIR/.gw_version"
     local installed_ver="" latest_ver=""
 
     if ls "$GATEWAY_DIR"/*/ibgateway &>/dev/null 2>&1; then
-        # Already installed — check whether a newer build is available
+        # Already installed — check whether a strictly newer build is available
         [[ -f "$GW_VERSION_FILE" ]] && installed_ver="$(cat "$GW_VERSION_FILE")"
         info "IB Gateway installed${installed_ver:+ (${installed_ver})} — checking for updates…"
         latest_ver="$(_gw_latest_version)"
-        if [[ -n "$latest_ver" && "$installed_ver" == "$latest_ver" ]]; then
+
+        if [[ -z "$latest_ver" ]]; then
+            # Cannot determine latest version from URL — skip conservatively
+            success "IB Gateway already installed — skipping download (cannot determine latest version)."
+            return
+        fi
+        if [[ -z "$installed_ver" ]]; then
+            # No version stamp on disk — skip conservatively; user can --update explicitly
+            success "IB Gateway already installed (version unknown) — skipping download."
+            return
+        fi
+        if ! _gw_version_gt "$latest_ver" "$installed_ver"; then
             success "IB Gateway is up to date (${installed_ver}) — skipping download."
             return
         fi
-        if [[ -n "$latest_ver" ]]; then
-            info "New version available: ${latest_ver}${installed_ver:+ (was ${installed_ver})} — updating…"
-        else
-            # Could not determine latest version (no version token in URL)
-            success "IB Gateway already installed — skipping download (run --update to force)."
-            return
-        fi
+        info "Newer version available: ${latest_ver} (installed: ${installed_ver}) — updating…"
     else
-        info "Downloading IB Gateway stable offline installer…"
+        info "IB Gateway not found — downloading…"
         latest_ver="$(_gw_latest_version)"
     fi
 
