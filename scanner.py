@@ -283,9 +283,39 @@ def score_symbol(bars: pd.DataFrame,
     }
 
 
+def _batch_fetch(data_client, syms: list, days: int = 90,
+                 as_of: Optional[datetime] = None) -> Dict[str, pd.DataFrame]:
+    """Fetch daily bars for multiple symbols in a single API call."""
+    from alpaca.data.requests import StockBarsRequest
+    from alpaca.data.timeframe import TimeFrame
+    try:
+        end = as_of or datetime.now()
+        req = StockBarsRequest(
+            symbol_or_symbols=syms,
+            timeframe=TimeFrame.Day,
+            start=end - timedelta(days=days),
+            end=end,
+        )
+        df = data_client.get_stock_bars(req).df
+        if df.empty:
+            return {}
+        result = {}
+        for sym in syms:
+            try:
+                sym_df = df.xs(sym, level=0).sort_index()
+                if not sym_df.empty:
+                    result[sym] = sym_df
+            except KeyError:
+                pass
+        return result
+    except Exception as e:
+        logger.debug(f"Batch fetch failed for {syms[:3]}…: {e}")
+        return {}
+
+
 def scan(data_client, top_n: int = 10, progress_cb=None,
          as_of: Optional[datetime] = None,
-         workers: int = 20,
+         chunk_size: int = 100,
          filters: Optional[ScanFilters] = None,
          symbols: Optional[list] = None) -> pd.DataFrame:
     """
@@ -293,13 +323,12 @@ def scan(data_client, top_n: int = 10, progress_cb=None,
 
     progress_cb : optional callable(done, total) for progress updates
     as_of       : if set, fetch bars ending on this date (historical mode)
-    workers     : parallel fetch threads
+    chunk_size  : symbols per batch API request (Alpaca supports ~1000)
     filters     : ScanFilters instance (uses defaults if None)
     symbols     : list of tickers to scan (defaults to full UNIVERSE)
     """
     symbols = list(dict.fromkeys(symbols)) if symbols else UNIVERSE
     total   = len(symbols)
-    done    = 0
 
     # ── Fetch SPY for relative-strength baseline ───────────────────────────
     spy_bars = fetch_bars(data_client, "SPY", as_of=as_of)
@@ -309,22 +338,15 @@ def scan(data_client, top_n: int = 10, progress_cb=None,
         spy_rets["5d"]  = (c.iloc[-1] / c.iloc[-6]  - 1) * 100 if len(c) > 6  else 0
         spy_rets["20d"] = (c.iloc[-1] / c.iloc[-21] - 1) * 100 if len(c) > 21 else 0
 
-    # ── Parallel fetch ─────────────────────────────────────────────────────
+    # ── Batch fetch in chunks ──────────────────────────────────────────────
     bars_map: Dict[str, pd.DataFrame] = {}
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(fetch_bars, data_client, sym, 90, as_of): sym
-                   for sym in symbols}
-        for fut in as_completed(futures):
-            sym = futures[fut]
-            done += 1
-            if progress_cb:
-                progress_cb(done, total)
-            try:
-                result = fut.result()
-                if result is not None:
-                    bars_map[sym] = result
-            except Exception:
-                pass
+    chunks = [symbols[i:i + chunk_size] for i in range(0, len(symbols), chunk_size)]
+    done = 0
+    for chunk in chunks:
+        bars_map.update(_batch_fetch(data_client, chunk, 90, as_of))
+        done += len(chunk)
+        if progress_cb:
+            progress_cb(min(done, total), total)
 
     # ── Score ──────────────────────────────────────────────────────────────
     results = []
