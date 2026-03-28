@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
 # Goldvreneli — installer
-# Usage: ./install.sh [OPTIONS] [TARGET_DIR]
+# Usage: ./goldvreneli-install.sh [OPTIONS] [TARGET_DIR]
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -18,10 +18,11 @@ PROD_FILES=(
     app.py
     autotrader.py
     scanner.py
+    replay.py
     gateway_manager.py
     version.py
     requirements.txt
-    install.sh
+    goldvreneli-install.sh
 )
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
@@ -46,7 +47,7 @@ deploy_files() {
             warn "Source file not found, skipping: $f"
         fi
     done
-    chmod +x "$dst/install.sh"
+    chmod +x "$dst/goldvreneli-install.sh"
     success "Production files deployed (dev files excluded)."
 }
 
@@ -236,6 +237,36 @@ do_update() {
     require_cmd git
     require_cmd curl
 
+    CUR_VERSION="$(grep -oP '(?<=__version__ = ")[^"]+' "$INSTALL_DIR/version.py" 2>/dev/null || echo "unknown")"
+
+    # ── Fast path: git pull if install dir is already a repo ──────────────
+    if git -C "$INSTALL_DIR" rev-parse --is-inside-work-tree &>/dev/null; then
+        info "Installation is a git repo — trying git pull…"
+        if git -C "$INSTALL_DIR" pull --ff-only origin main 2>/dev/null; then
+            NEW_VERSION="$(grep -oP '(?<=__version__ = ")[^"]+' "$INSTALL_DIR/version.py" 2>/dev/null || echo "unknown")"
+            if [[ "$NEW_VERSION" == "$CUR_VERSION" ]]; then
+                success "Already up to date (v$CUR_VERSION)."
+            else
+                success "Pulled v$CUR_VERSION → v$NEW_VERSION"
+            fi
+            # Skip the clone-and-deploy path
+            info "Updating Python dependencies…"
+            cd "$INSTALL_DIR"
+            venv/bin/pip install --quiet --upgrade pip
+            venv/bin/pip install --quiet -r requirements.txt
+            # Only update IB Gateway if it was previously installed here
+            ls "$GATEWAY_DIR"/*/ibgateway &>/dev/null 2>&1 && { info "Checking for IB Gateway updates…"; install_ib_gateway; } || true
+            echo ""
+            echo -e "${GREEN}Update complete — now at v${NEW_VERSION}.${NC}"
+            echo "  Restart the app: streamlit run $INSTALL_DIR/app.py"
+            echo ""
+            return
+        else
+            warn "git pull failed (diverged or no remote) — falling back to fresh clone."
+        fi
+    fi
+
+    # ── Fallback: clone main and deploy prod files ─────────────────────────
     TMP_REPO="$(mktemp -d /tmp/goldvreneli-update-XXXXXX)"
     trap "rm -rf $TMP_REPO" EXIT
 
@@ -244,11 +275,15 @@ do_update() {
         git clone --depth 1 "$REPO_URL" "$TMP_REPO"
 
     NEW_VERSION="$(grep -oP '(?<=__version__ = ")[^"]+' "$TMP_REPO/version.py" 2>/dev/null || echo "unknown")"
-    CUR_VERSION="$(grep -oP '(?<=__version__ = ")[^"]+' "$INSTALL_DIR/version.py" 2>/dev/null || echo "unknown")"
 
     if [[ "$NEW_VERSION" == "$CUR_VERSION" ]]; then
         success "Already up to date (v$CUR_VERSION)."
         # Still update deps in case requirements changed
+    elif [[ "$NEW_VERSION" != "unknown" && "$CUR_VERSION" != "unknown" ]] && \
+         ! _gw_version_gt "$NEW_VERSION" "$CUR_VERSION"; then
+        warn "Remote is v${NEW_VERSION}, installed is v${CUR_VERSION} — not downgrading."
+        warn "Run 'git push' on dev and re-merge to main first."
+        return
     else
         info "Updating v$CUR_VERSION → v$NEW_VERSION"
     fi
@@ -256,8 +291,11 @@ do_update() {
     info "Deploying updated production files…"
     deploy_files "$TMP_REPO" "$INSTALL_DIR"
 
-    info "Checking for IB Gateway updates…"
-    install_ib_gateway
+    # Only check IB Gateway if binary was already installed here
+    if ls "$GATEWAY_DIR"/*/ibgateway &>/dev/null 2>&1; then
+        info "Checking for IB Gateway updates…"
+        install_ib_gateway
+    fi
 
     info "Updating Python dependencies…"
     cd "$INSTALL_DIR"
@@ -314,7 +352,7 @@ print_summary() {
     echo "       streamlit run app.py"
     echo ""
     echo "  3. To update later:"
-    echo "       $INSTALL_DIR/install.sh --update"
+    echo "       $INSTALL_DIR/goldvreneli-install.sh --update"
     echo ""
 }
 
@@ -347,7 +385,7 @@ for arg in "$@"; do
         --with-ibc)      UNINSTALL_IBC=true ;;
         --with-gateway)  UNINSTALL_GATEWAY=true ;;
         --help|-h)
-            echo "Usage: ./install.sh [OPTIONS] [TARGET_DIR]"
+            echo "Usage: ./goldvreneli-install.sh [OPTIONS] [TARGET_DIR]"
             echo ""
             echo "  TARGET_DIR             Install to this directory (default: script location)"
             echo ""
