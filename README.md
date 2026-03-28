@@ -67,8 +67,8 @@ IBKR_USERNAME=
 IBKR_PASSWORD=
 
 # Paths (auto-detected by installer)
-IBC_PATH=~/ibc
-GATEWAY_PATH=~/Jts/ibgateway
+IBC_PATH=~/goldvreneli/ibc
+GATEWAY_PATH=~/goldvreneli/Jts/ibgateway
 ```
 
 Get Alpaca paper API keys at [alpaca.markets](https://alpaca.markets) → Paper Trading → API Keys.
