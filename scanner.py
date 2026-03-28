@@ -20,23 +20,130 @@ import pandas_ta as ta
 
 logger = logging.getLogger(__name__)
 
-# Liquid universe — large/mid-cap US equities across sectors
+# Liquid universe — large/mid-cap US equities, ETFs, and ADRs (~600 symbols)
 UNIVERSE = [
-    # Tech
-    "AAPL", "MSFT", "NVDA", "AMD", "GOOGL", "META", "AMZN", "TSLA",
-    "ORCL", "CRM", "ADBE", "NOW", "SNOW", "PANW", "CRWD", "NET",
-    # Finance
-    "JPM", "BAC", "GS", "MS", "V", "MA", "AXP", "BX", "KKR",
-    # Health
-    "LLY", "UNH", "JNJ", "ABBV", "MRK", "PFE", "AMGN", "GILD",
-    # Energy
-    "XOM", "CVX", "COP", "OXY", "SLB", "EOG",
-    # Consumer
-    "COST", "HD", "NKE", "SBUX", "MCD", "TGT", "WMT", "AMZN",
-    # Industrial
-    "CAT", "DE", "BA", "GE", "HON", "RTX", "LMT",
-    # ETFs
-    "SPY", "QQQ", "IWM", "XLK", "XLF", "XLE", "XLV", "GLD", "SLV",
+    # Mega-cap tech
+    "AAPL", "MSFT", "NVDA", "GOOGL", "GOOG", "META", "AMZN", "TSLA",
+    # Semiconductors
+    "AMD", "INTC", "QCOM", "AVGO", "TXN", "MU", "AMAT", "LRCX", "KLAC", "MRVL",
+    "ON", "SMCI", "MPWR", "WOLF", "SWKS", "QRVO", "MCHP", "ADI", "NXPI", "STM",
+    "ASML", "TSM", "SLAB", "ACLS", "ONTO", "COHU", "FORM",
+    # Software / Cloud
+    "ORCL", "CRM", "ADBE", "NOW", "SNOW", "DDOG", "MDB", "VEEV", "WDAY", "ZM",
+    "HUBS", "TTD", "GTLB", "CFLT", "NET", "OKTA", "ZS", "FTNT", "PANW", "CRWD",
+    "S", "CYBR", "TENB", "RPM", "MNDY", "APPN", "PCTY", "PAYC", "COUP", "NCNO",
+    "BRZE", "BILL", "SMAR", "BOX", "DOCN", "ESTC", "FROG", "ALTR", "AVLR",
+    "GDDY", "WIX", "SQSP", "WEAVE", "ASAN", "AI", "PLTR", "BBAI", "SOUN",
+    # Hardware / Networking
+    "ANET", "HPE", "DELL", "WDC", "STX", "PSTG", "NTAP", "VIAV", "CIEN",
+    "INFN", "CALX", "LITE", "IIVI", "COHR", "NPKI",
+    # Internet / E-commerce / Social
+    "SHOP", "EBAY", "PINS", "SNAP", "RDDT", "ABNB", "UBER", "LYFT", "DASH",
+    "ETSY", "MELI", "SE", "GRAB", "CARG", "YELP", "ANGI", "IAC",
+    "TWLO", "SEND", "BAND", "MSGM", "MTCH", "BMBL", "GRINDR",
+    # Finance — banks
+    "JPM", "BAC", "WFC", "C", "GS", "MS", "USB", "PNC", "TFC", "COF",
+    "FITB", "RF", "HBAN", "CFG", "KEY", "MTB", "WAL", "EWBC", "SIVB", "ZION",
+    "ALLY", "SYF", "DFS", "OMF", "NAVI",
+    # Finance — capital markets / asset mgmt
+    "BX", "KKR", "APO", "CG", "BN", "BAM", "ARES", "OWL", "BLUE", "TPG",
+    "BLK", "IVZ", "AMG", "VRTS", "VCTR", "STEP",
+    # Finance — payments / fintech
+    "AXP", "V", "MA", "PYPL", "SQ", "AFRM", "SOFI", "UPST", "LC", "OPEN",
+    "COIN", "HOOD", "MKTX", "IBKR", "LPLA",
+    # Finance — insurance
+    "CB", "AIG", "MET", "PRU", "AFL", "ALL", "PGR", "TRV", "HIG", "L",
+    "RE", "RNR", "ACGL", "ERIE", "CINF",
+    # Healthcare — large pharma
+    "LLY", "JNJ", "ABBV", "MRK", "PFE", "BMY", "AZN", "NVO", "SNY", "GSK",
+    # Healthcare — biotech
+    "AMGN", "GILD", "REGN", "VRTX", "BIIB", "INCY", "MRNA", "BNTX",
+    "SGEN", "ALNY", "IONS", "EXEL", "HALO", "JAZZ", "ACAD", "SAGE",
+    "FOLD", "RARE", "BLUE", "EDIT", "NTLA", "BEAM", "CRSP", "PACB",
+    # Healthcare — managed care / services
+    "UNH", "CVS", "CI", "HUM", "CNC", "MOH", "ELV", "OSCR",
+    "DGX", "LH", "EXAS", "NTRA", "QDEL",
+    # Healthcare — equipment / devices
+    "ISRG", "MDT", "ABT", "SYK", "BSX", "EW", "ZBH", "HOLX",
+    "DXCM", "PODD", "TDOC", "PHR", "NVCR", "NVRO", "SWAV", "INSP",
+    "AXNX", "NARI", "TMDX", "ATRC", "SILK",
+    # Energy — oil & gas
+    "XOM", "CVX", "COP", "OXY", "SLB", "EOG", "PSX", "MPC", "VLO",
+    "HES", "DVN", "FANG", "MRO", "APA", "HAL", "BKR", "FTI", "NOV",
+    "RIG", "VAL", "HP", "WTTR", "PUMP",
+    # Energy — utilities
+    "NEE", "D", "DUK", "SO", "AEP", "EXC", "SRE", "PCG", "XEL",
+    "ETR", "PPL", "ES", "CNP", "NI", "OGE", "EVRG", "AEE", "WEC",
+    # Energy — clean / renewables
+    "ENPH", "FSLR", "PLUG", "BEAM", "RUN", "NOVA", "ARRY", "CSIQ",
+    "SEDG", "MAXN", "SHLS", "BE", "BLDP", "CWEN",
+    # Consumer discretionary — retail
+    "COST", "HD", "LOW", "TGT", "WMT", "DLTR", "DG", "BURL", "TJX", "ROST",
+    "BBY", "FIVE", "OLLI", "BIG", "PRTY", "BOOT", "CATO", "EXPR",
+    # Consumer discretionary — restaurants / leisure
+    "MCD", "SBUX", "YUM", "DPZ", "CMG", "DRI", "TXRH", "DENN", "JACK",
+    "EAT", "CAKE", "RRGB", "SHAK", "WING", "BROS", "NDLS",
+    # Consumer discretionary — apparel / brands
+    "NKE", "LULU", "PVH", "RL", "VFC", "UAA", "UA", "CROX", "DECK",
+    "SKX", "ONON", "BIRK", "GOOS",
+    # Consumer discretionary — autos
+    "F", "GM", "STLA", "TM", "HMC", "RIVN", "LCID", "NIO", "XPEV", "LI",
+    "RACE", "HOG", "THRM", "LEA", "MGA", "BWA",
+    # Consumer discretionary — travel / lodging
+    "MAR", "HLT", "H", "IHG", "WH", "RCL", "CCL", "NCLH", "VAC",
+    "TNL", "PLYA", "SOND",
+    # Consumer staples
+    "PG", "KO", "PEP", "MDLZ", "GIS", "K", "HRL", "SJM", "MKC",
+    "PM", "MO", "BTI", "STZ", "BUD", "TAP", "SAM", "MNST", "CELH",
+    "CHD", "CLX", "CL", "EL", "COTY", "REV",
+    # Industrials — defense
+    "LMT", "RTX", "NOC", "GD", "BA", "HII", "TDG", "LDOS", "SAIC", "BAH", "CACI",
+    # Industrials — machinery / equipment
+    "CAT", "DE", "EMR", "ETN", "PH", "ROK", "XYL", "CARR", "OTIS",
+    "MMM", "HON", "GE", "ITW", "DOV", "FTV", "GNRC", "RRX", "AME",
+    "ACCO", "CFX", "FELE", "HLIO", "AIRC",
+    # Industrials — transport
+    "UPS", "FDX", "JBHT", "CSX", "NSC", "UNP", "CNI", "CP",
+    "DAL", "UAL", "AAL", "LUV", "ALK", "SAVE",
+    "CHRW", "EXPD", "XPO", "SAIA", "ODFL", "WERN", "KNX",
+    # Materials
+    "LIN", "APD", "ECL", "SHW", "FCX", "NEM", "GOLD", "WPM",
+    "AA", "X", "NUE", "STLD", "CLF", "RS", "CMC",
+    "DD", "DOW", "LYB", "CE", "EMN", "OLN", "ASH",
+    # Real estate
+    "AMT", "PLD", "EQIX", "CCI", "SPG", "O", "WELL", "DLR",
+    "PSA", "EXR", "CUBE", "LSI", "NSA",
+    "AVB", "EQR", "MAA", "UDR", "CPT",
+    "VNO", "BXP", "KIM", "REG", "FRT", "NNN",
+    # Communication / media
+    "T", "VZ", "TMUS", "CHTR", "CMCSA", "NFLX", "DIS", "WBD", "PARA",
+    "FOX", "FOXA", "NYT", "IAC", "ZD", "SGRY",
+    # Broad & factor ETFs
+    "SPY", "QQQ", "IWM", "DIA", "VTI", "VOO", "MDY", "IJR", "IWF", "IWD",
+    "VUG", "VTV", "MTUM", "QUAL", "USMV", "VLUE",
+    # Sector ETFs
+    "XLK", "XLF", "XLE", "XLV", "XLI", "XLY", "XLP", "XLU", "XLB", "XLRE",
+    "SMH", "SOXX", "IGV", "HACK", "CIBR", "BUG",
+    "IBB", "XBI", "FBT", "ARKG",
+    "ARKK", "ARKW", "ARKF", "ARKQ",
+    "KBWB", "KRE", "IAT", "FINX",
+    "OIH", "XOP", "AMLP", "TAN", "ICLN", "QCLN",
+    "ITB", "XHB", "JETS", "AWAY",
+    # Leveraged / inverse ETFs (liquid, use with care)
+    "TQQQ", "SQQQ", "UPRO", "SPXU", "SOXL", "SOXS",
+    "UVXY", "SVXY", "VXX",
+    # Commodity / macro / bond ETFs
+    "GLD", "IAU", "SLV", "PPLT", "PALL",
+    "GDX", "GDXJ", "SIL", "SILJ",
+    "USO", "UCO", "UNG",
+    "TLT", "IEF", "SHY", "GOVT", "BND", "AGG",
+    "HYG", "JNK", "LQD", "EMB",
+    "UUP", "FXE", "FXY", "FXB",
+    # International ETFs
+    "EFA", "EEM", "VEA", "VWO", "IEFA", "IEMG",
+    "EWJ", "EWZ", "EWC", "EWG", "EWU", "EWA", "EWH", "EWY", "EWT",
+    "FXI", "MCHI", "KWEB", "CQQQ",
+    "INDA", "INDY", "EPI",
 ]
 
 # De-duplicate

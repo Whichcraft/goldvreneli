@@ -545,7 +545,7 @@ if broker == "Alpaca (Paper)":
     # ── Page: Scanner ────────────────────────────────────────────────────────
     elif page == "Scanner":
         st.subheader("Position Scanner")
-        st.caption("Scans ~60 liquid US stocks and ETFs, applies technical filters, proposes the top candidates.")
+        st.caption("Scans ~600 liquid US stocks, ETFs, and ADRs, applies technical filters, proposes the top candidates.")
 
         col_a, col_b, col_c = st.columns([1, 2, 2])
         top_n    = col_a.number_input("Top N results", min_value=1, max_value=30,
