@@ -155,6 +155,12 @@ if page == "Settings":
                                              help="Allow price this % below SMA20")
         f_scan_min_ret5d  = c4.number_input("Min 5d return (%)",   min_value=-20.0, max_value=20.0,
                                              value=float(env_get("SCAN_MIN_RET5D",  "-1.0")), step=0.5)
+        f_scan_watchlist  = st.text_area(
+            "Default watchlist (comma-separated — used as pre-selection in Scanner)",
+            value=env_get("SCAN_WATCHLIST", ""),
+            height=80,
+            placeholder="AAPL, MSFT, NVDA, …  (leave blank to start with full universe)",
+        )
 
         st.divider()
         saved = st.form_submit_button("Save Settings", type="primary")
@@ -180,6 +186,7 @@ if page == "Settings":
             "SCAN_MIN_ADV_M":          str(f_scan_min_adv),
             "SCAN_SMA20_TOL":          str(f_scan_sma20_tol),
             "SCAN_MIN_RET5D":          str(f_scan_min_ret5d),
+            "SCAN_WATCHLIST":          f_scan_watchlist,
         })
         # Clear cached clients so they reconnect with new keys
         get_alpaca_clients.clear()
@@ -574,16 +581,25 @@ if broker == "Alpaca (Paper)":
                                        disabled=not use_hist)
 
         # ── Symbol selection ──────────────────────────────────────────────────
-        with st.expander(f"Symbol list ({len(UNIVERSE)} in universe)", expanded=False):
-            sel_all = st.checkbox("Scan full universe", value=True, key="scan_sel_all")
+        _watchlist_raw = env_get("SCAN_WATCHLIST", "")
+        _watchlist = [s.strip().upper() for s in _watchlist_raw.replace(",", " ").split() if s.strip()]
+        _watchlist_valid = [s for s in _watchlist if s in UNIVERSE]
+
+        _default_all = len(_watchlist_valid) == 0
+        with st.expander(
+            f"Symbol list — {'full universe' if _default_all else f'{len(_watchlist_valid)} from watchlist'} ({len(UNIVERSE)} available)",
+            expanded=False,
+        ):
+            sel_all = st.checkbox("Scan full universe", value=_default_all, key="scan_sel_all")
             selected_syms = st.multiselect(
-                "Or pick specific symbols",
+                "Symbols to scan",
                 options=sorted(UNIVERSE),
-                default=[],
+                default=_watchlist_valid,
                 disabled=sel_all,
                 placeholder="Type to search…",
+                label_visibility="collapsed",
             )
-        scan_symbols = None if sel_all or not selected_syms else selected_syms
+        scan_symbols = None if sel_all else (selected_syms or None)
 
         with st.expander("Active filters"):
             st.markdown(f"""
