@@ -14,11 +14,14 @@ from scanner import scan
 # ── Config ────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title=f"Goldvreneli Trading v{__version__}", layout="wide")
 
-# ── Sidebar: broker selection ─────────────────────────────────────────────────
+# ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.title("Goldvreneli")
     st.caption(f"v{__version__}")
-    broker = st.radio("Broker", ["Alpaca (Paper)", "IBKR"])
+
+    st.divider()
+    st.subheader("Broker")
+    broker = st.radio("", ["Alpaca (Paper)", "IBKR"], label_visibility="collapsed")
 
     if broker == "Alpaca (Paper)":
         api_key    = st.text_input("API Key",    value=os.environ.get("ALPACA_PAPER_API_KEY", ""),    type="password")
@@ -32,6 +35,30 @@ with st.sidebar:
         trading_mode = st.selectbox("Mode", ["paper", "live"])
         ibkr_client_id = st.number_input("Client ID", value=1)
         st.caption("Paper port: 4002 | Live port: 4001")
+
+    st.divider()
+    st.subheader("Navigation")
+    if broker == "Alpaca (Paper)":
+        page = st.radio("", ["Portfolio", "AutoTrader", "Scanner"], label_visibility="collapsed")
+    else:
+        page = st.radio("", ["Portfolio"], label_visibility="collapsed")
+
+    st.divider()
+    with st.expander("About"):
+        st.markdown(f"""
+**Goldvreneli Trading**
+Version `{__version__}`
+
+**Features**
+- Portfolio overview & orders
+- AutoTrader (trailing stop)
+- Position Scanner
+
+**Brokers**
+- Alpaca Paper Trading
+- IBKR (via IB Gateway)
+        """)
+
 
 # ── Alpaca helpers ────────────────────────────────────────────────────────────
 @st.cache_resource
@@ -79,10 +106,8 @@ if broker == "Alpaca (Paper)":
 
     st.title("Portfolio Dashboard (Alpaca Paper)")
 
-    tab_portfolio, tab_autotrader, tab_scanner = st.tabs(["Portfolio", "AutoTrader", "Scanner"])
-
-    # ── Tab: Portfolio ────────────────────────────────────────────────────────
-    with tab_portfolio:
+    # ── Page: Portfolio ───────────────────────────────────────────────────────
+    if page == "Portfolio":
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Portfolio Value", f"${float(account.portfolio_value):,.2f}")
         col2.metric("Cash",            f"${float(account.cash):,.2f}")
@@ -198,8 +223,8 @@ if broker == "Alpaca (Paper)":
         else:
             st.info("No open orders.")
 
-    # ── Tab: AutoTrader ───────────────────────────────────────────────────────
-    with tab_autotrader:
+    # ── Page: AutoTrader ─────────────────────────────────────────────────────
+    elif page == "AutoTrader":
         st.subheader("AutoTrader — Trailing Stop")
         st.caption("Buys a position and sells automatically when price drops below the trailing stop threshold.")
 
@@ -301,8 +326,8 @@ if broker == "Alpaca (Paper)":
             time.sleep(at._poll_interval)
             st.rerun()
 
-    # ── Tab: Scanner ──────────────────────────────────────────────────────────
-    with tab_scanner:
+    # ── Page: Scanner ────────────────────────────────────────────────────────
+    elif page == "Scanner":
         st.subheader("Position Scanner")
         st.caption("Scans ~60 liquid US stocks and ETFs, applies technical filters, proposes the top 10.")
 
