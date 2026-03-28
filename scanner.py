@@ -286,16 +286,18 @@ def score_symbol(bars: pd.DataFrame,
 def scan(data_client, top_n: int = 10, progress_cb=None,
          as_of: Optional[datetime] = None,
          workers: int = 20,
-         filters: Optional[ScanFilters] = None) -> pd.DataFrame:
+         filters: Optional[ScanFilters] = None,
+         symbols: Optional[list] = None) -> pd.DataFrame:
     """
-    Scan UNIVERSE, apply filters, return top_n candidates sorted by score.
+    Scan symbols, apply filters, return top_n candidates sorted by score.
 
     progress_cb : optional callable(done, total) for progress updates
     as_of       : if set, fetch bars ending on this date (historical mode)
     workers     : parallel fetch threads
     filters     : ScanFilters instance (uses defaults if None)
+    symbols     : list of tickers to scan (defaults to full UNIVERSE)
     """
-    symbols = UNIVERSE
+    symbols = list(dict.fromkeys(symbols)) if symbols else UNIVERSE
     total   = len(symbols)
     done    = 0
 

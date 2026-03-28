@@ -13,7 +13,7 @@ from autotrader import (
     StopMode, EntryMode, size_from_risk,
 )
 from replay import ReplayPriceFeed, SyntheticPriceFeed, MockBroker, load_sessions
-from scanner import scan, ScanFilters
+from scanner import scan, ScanFilters, UNIVERSE
 
 INSTALL_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_FILE    = os.path.join(INSTALL_DIR, ".env")
@@ -572,12 +572,24 @@ if broker == "Alpaca (Paper)":
         use_hist   = col_b.checkbox("Historical date", value=False)
         as_of_date = col_c.date_input("As-of date", value=datetime.now().date(),
                                        disabled=not use_hist)
-        run_scan = st.button("Run Scan", type="primary")
+
+        # ── Symbol selection ──────────────────────────────────────────────────
+        with st.expander(f"Symbol list ({len(UNIVERSE)} in universe)", expanded=False):
+            sel_all = st.checkbox("Scan full universe", value=True, key="scan_sel_all")
+            selected_syms = st.multiselect(
+                "Or pick specific symbols",
+                options=sorted(UNIVERSE),
+                default=[],
+                disabled=sel_all,
+                placeholder="Type to search…",
+            )
+        scan_symbols = None if sel_all or not selected_syms else selected_syms
 
         with st.expander("Active filters"):
             st.markdown(f"""
 | Filter | Value |
 |--------|-------|
+| Symbols | {"Full universe (%d)" % len(UNIVERSE) if scan_symbols is None else "%d selected" % len(scan_symbols)} |
 | Min price | ${scan_filters.min_price:.0f} |
 | Min ADV | ${scan_filters.min_adv_m:.0f}M |
 | RSI(14) | {scan_filters.rsi_lo:.0f} – {scan_filters.rsi_hi:.0f} |
@@ -586,8 +598,10 @@ if broker == "Alpaca (Paper)":
 | Min 5d return | {scan_filters.min_ret_5d:.1f}% |
 | Above SMA50 | required |
 
-_Adjust in **⚙️ Settings → Scanner Filters**_
+_Adjust thresholds in **⚙️ Settings → Scanner Filters**_
 """)
+
+        run_scan = st.button("Run Scan", type="primary")
 
         if run_scan:
             progress_bar = st.progress(0, text="Scanning…")
@@ -599,7 +613,7 @@ _Adjust in **⚙️ Settings → Scanner Filters**_
             with st.spinner("Running scan…"):
                 st.session_state.scan_results = scan(data_client, top_n=int(top_n),
                                                       progress_cb=on_progress, as_of=as_of_dt,
-                                                      filters=scan_filters)
+                                                      filters=scan_filters, symbols=scan_symbols)
 
             progress_bar.empty()
 
