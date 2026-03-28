@@ -1,3 +1,4 @@
+aeventkit==2.1.0
 alpaca-py==0.43.2
 altair==6.0.0
 annotated-types==0.7.0
@@ -9,6 +10,7 @@ charset-normalizer==3.4.6
 click==8.3.1
 gitdb==4.0.12
 GitPython==3.1.46
+ib_async==2.1.0
 idna==3.11
 Jinja2==3.1.6
 jsonschema==4.26.0
@@ -16,6 +18,7 @@ jsonschema-specifications==2025.9.1
 MarkupSafe==3.0.3
 msgpack==1.1.2
 narwhals==2.18.1
+nest-asyncio==1.6.0
 numpy==2.4.3
 packaging==26.0
 pandas==2.3.3
