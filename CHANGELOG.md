@@ -63,7 +63,7 @@ All notable changes to this project will be documented here.
 ## [0.3.0] — 2026-03-28
 
 ### Added
-- `install.sh` — one-command installer for system deps, IB Gateway, IBC, Xvfb, and `.env` template
+- `goldvreneli-install.sh` — one-command installer for system deps, IB Gateway, IBC, Xvfb, and `.env` template
 - `--skip-gateway` and `--skip-ibc` flags for the installer
 - `version.py` — single source of truth for semantic version
 - `bump.sh` — version bump script (major/minor/patch), updates CHANGELOG and creates git tag

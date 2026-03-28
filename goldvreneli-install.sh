@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
 # Goldvreneli — installer
-# Usage: ./install.sh [OPTIONS] [TARGET_DIR]
+# Usage: ./goldvreneli-install.sh [OPTIONS] [TARGET_DIR]
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -21,7 +21,7 @@ PROD_FILES=(
     gateway_manager.py
     version.py
     requirements.txt
-    install.sh
+    goldvreneli-install.sh
 )
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
@@ -46,7 +46,7 @@ deploy_files() {
             warn "Source file not found, skipping: $f"
         fi
     done
-    chmod +x "$dst/install.sh"
+    chmod +x "$dst/goldvreneli-install.sh"
     success "Production files deployed (dev files excluded)."
 }
 
@@ -343,7 +343,7 @@ print_summary() {
     echo "       streamlit run app.py"
     echo ""
     echo "  3. To update later:"
-    echo "       $INSTALL_DIR/install.sh --update"
+    echo "       $INSTALL_DIR/goldvreneli-install.sh --update"
     echo ""
 }
 
@@ -376,7 +376,7 @@ for arg in "$@"; do
         --with-ibc)      UNINSTALL_IBC=true ;;
         --with-gateway)  UNINSTALL_GATEWAY=true ;;
         --help|-h)
-            echo "Usage: ./install.sh [OPTIONS] [TARGET_DIR]"
+            echo "Usage: ./goldvreneli-install.sh [OPTIONS] [TARGET_DIR]"
             echo ""
             echo "  TARGET_DIR             Install to this directory (default: script location)"
             echo ""

@@ -33,7 +33,7 @@ A Streamlit-based trading dashboard supporting **Alpaca Paper Trading** and **In
 ```bash
 git clone git@github.com:Whichcraft/goldvreneli.git
 cd goldvreneli
-./install.sh
+./goldvreneli-install.sh
 ```
 
 The installer sets up:
@@ -46,9 +46,9 @@ The installer sets up:
 ### Flags
 
 ```bash
-./install.sh --skip-gateway   # skip IB Gateway install
-./install.sh --skip-ibc       # skip IBC install
-./install.sh --help
+./goldvreneli-install.sh --skip-gateway   # skip IB Gateway install
+./goldvreneli-install.sh --skip-ibc       # skip IBC install
+./goldvreneli-install.sh --help
 ```
 
 ---
@@ -168,7 +168,7 @@ goldvreneli/
 ├── gateway_manager.py  # IB Gateway lifecycle (IBC + Xvfb)
 ├── version.py          # Single version source of truth
 ├── bump.sh             # Version bump script
-├── install.sh          # One-command installer
+├── goldvreneli-install.sh          # One-command installer
 ├── requirements.txt    # Python dependencies
 ├── .env                # Credentials (gitignored)
 └── venv/               # Python virtual environment (gitignored)
