@@ -279,6 +279,11 @@ do_update() {
     if [[ "$NEW_VERSION" == "$CUR_VERSION" ]]; then
         success "Already up to date (v$CUR_VERSION)."
         # Still update deps in case requirements changed
+    elif [[ "$NEW_VERSION" != "unknown" && "$CUR_VERSION" != "unknown" ]] && \
+         ! _gw_version_gt "$NEW_VERSION" "$CUR_VERSION"; then
+        warn "Remote is v${NEW_VERSION}, installed is v${CUR_VERSION} — not downgrading."
+        warn "Run 'git push' on dev and re-merge to main first."
+        return
     else
         info "Updating v$CUR_VERSION → v$NEW_VERSION"
     fi
@@ -286,8 +291,11 @@ do_update() {
     info "Deploying updated production files…"
     deploy_files "$TMP_REPO" "$INSTALL_DIR"
 
-    info "Checking for IB Gateway updates…"
-    install_ib_gateway
+    # Only check IB Gateway if binary was already installed here
+    if ls "$GATEWAY_DIR"/*/ibgateway &>/dev/null 2>&1; then
+        info "Checking for IB Gateway updates…"
+        install_ib_gateway
+    fi
 
     info "Updating Python dependencies…"
     cd "$INSTALL_DIR"
