@@ -287,7 +287,7 @@ do_update() {
             ls "$GATEWAY_DIR"/*/ibgateway &>/dev/null 2>&1 && { info "Checking for IB Gateway updates…"; install_ib_gateway; } || true
             echo ""
             echo -e "${GREEN}Update complete — now at v${NEW_VERSION}.${NC}"
-            echo "  Restart the app: streamlit run $INSTALL_DIR/app.py"
+            echo "  Restart the app: cd $INSTALL_DIR && source venv/bin/activate && streamlit run app.py"
             echo ""
             return
         else
@@ -334,7 +334,7 @@ do_update() {
 
     echo ""
     echo -e "${GREEN}Update complete — now at v${NEW_VERSION}.${NC}"
-    echo "  Restart the app: streamlit run $INSTALL_DIR/app.py"
+    echo "  Restart the app: cd $INSTALL_DIR && source venv/bin/activate && streamlit run app.py"
     echo ""
 }
 
