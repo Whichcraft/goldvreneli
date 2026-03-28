@@ -8,7 +8,10 @@ from dotenv import load_dotenv, dotenv_values, set_key
 load_dotenv()
 
 from version import __version__
-from autotrader import AutoTrader, TraderState
+from autotrader import (
+    AutoTrader, MultiTrader, TraderConfig, TraderState,
+    StopMode, EntryMode, size_from_risk,
+)
 from scanner import scan
 
 ENV_FILE = os.path.join(os.path.dirname(__file__), ".env")
@@ -123,12 +126,15 @@ if page == "Settings":
 
         # ── AutoTrader defaults ───────────────────────────────────────────────
         st.subheader("AutoTrader Defaults")
-        c1, c2, c3 = st.columns(3)
+        c1, c2, c3, c4 = st.columns(4)
         f_at_symbol    = c1.text_input("Default Symbol",         value=env_get("AT_SYMBOL",    "AAPL"))
         f_at_threshold = c2.number_input("Trailing Stop %",      min_value=0.1, max_value=10.0,
                                           value=float(env_get("AT_THRESHOLD", "0.5")), step=0.1)
         f_at_poll      = c3.number_input("Poll Interval (s)",    min_value=1,
                                           value=int(env_get("AT_POLL", "5")),           step=1)
+        f_at_loss_lim  = c4.number_input("Daily Loss Limit ($)", min_value=0.0,
+                                          value=float(env_get("AT_DAILY_LOSS_LIMIT", "0")), step=100.0,
+                                          help="Stop new trades when realized losses reach this amount. 0 = disabled.")
 
         st.divider()
 
@@ -159,6 +165,7 @@ if page == "Settings":
             "AT_SYMBOL":               f_at_symbol,
             "AT_THRESHOLD":            str(f_at_threshold),
             "AT_POLL":                 str(f_at_poll),
+            "AT_DAILY_LOSS_LIMIT":     str(f_at_loss_lim),
             "SCAN_TOP_N":              str(f_scan_n),
             "SCAN_RSI_LO":             str(f_scan_rsi_lo),
             "SCAN_RSI_HI":             str(f_scan_rsi_hi),
@@ -318,8 +325,8 @@ if broker == "Alpaca (Paper)":
 
     # ── Page: AutoTrader ─────────────────────────────────────────────────────
     elif page == "AutoTrader":
-        st.subheader("AutoTrader — Trailing Stop")
-        st.caption("Buys a position and sells automatically when price drops below the trailing stop threshold.")
+        st.subheader("AutoTrader — Multi-Position Manager")
+        st.caption("Enters positions and exits automatically via trailing stop, take-profit, breakeven, or time stop.")
 
         def alpaca_get_price(symbol: str) -> float:
             from alpaca.data.requests import StockLatestQuoteRequest
@@ -338,78 +345,199 @@ if broker == "Alpaca (Paper)":
                 side=OrderSide.SELL, time_in_force=TimeInForce.DAY
             ))
 
-        if "autotrader" not in st.session_state:
-            st.session_state.autotrader = AutoTrader(
-                get_price=alpaca_get_price,
-                place_buy=alpaca_buy,
-                place_sell=alpaca_sell,
-            )
-        at = st.session_state.autotrader
-        s  = at.status
+        def alpaca_get_bars(symbol: str) -> pd.DataFrame:
+            bars = data_client.get_stock_bars(StockBarsRequest(
+                symbol_or_symbols=symbol,
+                timeframe=TimeFrame.Day,
+                start=datetime.now() - timedelta(days=30),
+            )).df
+            bars = bars.reset_index(level=0, drop=True)
+            return bars[["open", "high", "low", "close", "volume"]]
 
+        # Migrate old single-trader session key
+        if "autotrader" in st.session_state and "multitrader" not in st.session_state:
+            del st.session_state["autotrader"]
+
+        if "multitrader" not in st.session_state:
+            st.session_state.multitrader = MultiTrader(
+                get_price        = alpaca_get_price,
+                place_buy        = alpaca_buy,
+                place_sell       = alpaca_sell,
+                get_bars         = alpaca_get_bars,
+                daily_loss_limit = float(env_get("AT_DAILY_LOSS_LIMIT", "0")),
+            )
+        mt = st.session_state.multitrader
+
+        # ── New position form ─────────────────────────────────────────────
         with st.form("at_config"):
-            c1, c2, c3, c4 = st.columns(4)
-            at_symbol    = c1.text_input("Symbol",           value=st.session_state.pop("at_prefill", env_get("AT_SYMBOL", "AAPL"))).upper()
-            at_qty       = c2.number_input("Qty",            min_value=1, value=1, step=1)
-            at_threshold = c3.number_input("Trailing Stop %",min_value=0.1, max_value=10.0,
-                                            value=float(env_get("AT_THRESHOLD", "0.5")), step=0.1,
-                                            help="Sell when price drops this % below peak")
-            at_poll      = c4.number_input("Poll interval (s)", min_value=1,
-                                            value=int(env_get("AT_POLL", "5")), step=1)
-            col_start, col_stop = st.columns(2)
-            start_btn = col_start.form_submit_button("▶ Start AutoTrader", type="primary")
-            stop_btn  = col_stop.form_submit_button("⏹ Stop")
+            st.markdown("**New Position**")
+            c1, c2, c3 = st.columns(3)
+            at_symbol   = c1.text_input(
+                "Symbol",
+                value=st.session_state.pop("at_prefill", env_get("AT_SYMBOL", "AAPL")),
+            ).upper()
+            at_stop_mode = c2.selectbox("Stop Mode", ["PCT", "ATR"],
+                                        help="PCT = fixed %; ATR = N × ATR(14) dollars")
+            at_stop_val  = c3.number_input(
+                "Trailing Stop % " if True else "ATR Multiplier",
+                min_value=0.1, max_value=20.0,
+                value=float(env_get("AT_THRESHOLD", "0.5")), step=0.1,
+                help="For PCT: % drop from peak triggers sell. For ATR: multiplier × ATR(14).",
+            )
+
+            # Risk-based sizing
+            use_risk_sizing = st.checkbox("Size position by risk %", value=False)
+            if use_risk_sizing:
+                rc1, rc2, rc3 = st.columns(3)
+                at_equity    = rc1.number_input("Account equity ($)", min_value=1.0, value=10000.0, step=500.0)
+                at_risk_pct  = rc2.number_input("Risk per trade (%)", min_value=0.1, max_value=10.0, value=1.0, step=0.1)
+                at_entry_est = rc3.number_input("Est. entry price ($)", min_value=0.01, value=100.0, step=1.0)
+                # Compute stop distance from the chosen mode/value
+                stop_dist_est = at_entry_est * at_stop_val / 100
+                at_qty = size_from_risk(at_equity, at_risk_pct, at_entry_est, stop_dist_est)
+                st.caption(f"Computed qty: **{at_qty}** shares "
+                           f"(risking ${at_equity * at_risk_pct / 100:,.2f} @ ${stop_dist_est:.2f} stop distance)")
+            else:
+                at_qty = st.number_input("Qty (shares)", min_value=1, value=1, step=1)
+
+            at_poll = st.number_input("Poll interval (s)", min_value=1,
+                                      value=int(env_get("AT_POLL", "5")), step=1)
+
+            with st.expander("Entry mode"):
+                at_entry_mode    = st.selectbox("Entry", ["MARKET", "LIMIT", "SCALE"])
+                ec1, ec2         = st.columns(2)
+                at_limit_price   = ec1.number_input("Limit price ($)", min_value=0.0, value=0.0, step=0.01,
+                                                     disabled=(at_entry_mode != "LIMIT"))
+                at_limit_timeout = ec2.number_input("Limit timeout (s)", min_value=5, value=60, step=5,
+                                                     disabled=(at_entry_mode != "LIMIT"))
+                sc1, sc2         = st.columns(2)
+                at_scale_n       = sc1.number_input("Tranches", min_value=2, max_value=10, value=3, step=1,
+                                                     disabled=(at_entry_mode != "SCALE"))
+                at_scale_ivl     = sc2.number_input("Interval between tranches (s)", min_value=5,
+                                                     value=30, step=5, disabled=(at_entry_mode != "SCALE"))
+
+            with st.expander("Exit targets"):
+                xc1, xc2         = st.columns(2)
+                at_tp_pct        = xc1.number_input("Take-profit trigger (%)", min_value=0.0, value=0.0, step=0.1,
+                                                     help="0 = disabled. Sell at_tp_fraction of position when up this %.")
+                at_tp_frac       = xc2.slider("Fraction to sell at take-profit", min_value=0.1,
+                                               max_value=1.0, value=1.0, step=0.1)
+                xc3, xc4         = st.columns(2)
+                at_be_pct        = xc3.number_input("Breakeven trigger (%)", min_value=0.0, value=0.0, step=0.1,
+                                                     help="0 = disabled. Once up this %, move stop floor to entry price.")
+                at_time_stop     = xc4.number_input("Time stop (minutes)", min_value=0, value=0, step=5,
+                                                     help="0 = disabled. Exit after this many minutes.")
+
+            col_start, col_stop_all = st.columns(2)
+            start_btn    = col_start.form_submit_button("▶ Start", type="primary")
+            stop_all_btn = col_stop_all.form_submit_button("⏹ Stop All")
 
         if start_btn:
-            if s.state == TraderState.WATCHING:
-                st.warning("AutoTrader already running.")
-            else:
-                at._poll_interval = at_poll
-                try:
-                    at.start(at_symbol, int(at_qty), threshold_pct=at_threshold)
-                    st.success(f"AutoTrader started: {at_symbol} | Stop at {at_threshold}%")
-                except Exception as e:
-                    st.error(f"Failed to start: {e}")
+            cfg = TraderConfig(
+                stop_mode             = StopMode(at_stop_mode.lower()),
+                stop_value            = at_stop_val,
+                poll_interval         = float(at_poll),
+                entry_mode            = EntryMode(at_entry_mode.lower()),
+                limit_price           = at_limit_price,
+                limit_timeout_s       = float(at_limit_timeout),
+                scale_tranches        = at_scale_n,
+                scale_interval_s      = float(at_scale_ivl),
+                tp_trigger_pct        = at_tp_pct,
+                tp_qty_fraction       = at_tp_frac,
+                breakeven_trigger_pct = at_be_pct,
+                time_stop_minutes     = float(at_time_stop),
+            )
+            try:
+                mt.start(at_symbol, int(at_qty), config=cfg)
+                st.success(f"Started {at_symbol} — {at_stop_mode} stop @ {at_stop_val}")
+            except Exception as e:
+                st.error(str(e))
             st.rerun()
 
-        if stop_btn and s.state == TraderState.WATCHING:
-            at.stop()
-            st.info("AutoTrader stopped.")
+        if stop_all_btn:
+            mt.stop_all()
+            st.info("All positions stopped.")
             st.rerun()
 
-        state_color = {
-            TraderState.IDLE:     "gray",
-            TraderState.WATCHING: "green",
-            TraderState.SOLD:     "blue",
-            TraderState.STOPPED:  "orange",
-            TraderState.ERROR:    "red",
-        }
-        st.markdown(f"**Status:** :{state_color[s.state]}[{s.state.value.upper()}]")
+        # ── Positions table ───────────────────────────────────────────────
+        statuses = mt.statuses()
+        if statuses:
+            state_color = {
+                "idle":     "gray",
+                "entering": "blue",
+                "watching": "green",
+                "sold":     "blue",
+                "stopped":  "orange",
+                "error":    "red",
+            }
 
-        if s.state in (TraderState.WATCHING, TraderState.SOLD, TraderState.STOPPED):
-            m1, m2, m3, m4, m5 = st.columns(5)
-            m1.metric("Symbol",   s.symbol)
-            m2.metric("Entry",    f"${s.entry_price:.2f}")
-            m3.metric("Peak",     f"${s.peak_price:.2f}")
-            m4.metric("Current",  f"${s.current_price:.2f}")
-            m5.metric("Drawdown", f"{s.drawdown_pct:.2f}%",
-                      delta=f"Stop @ {s.threshold_pct}%", delta_color="inverse")
+            st.divider()
+            st.subheader("Positions")
 
-            pnl_color = "green" if s.pnl >= 0 else "red"
-            st.markdown(f"**P&L:** :{pnl_color}[${s.pnl:,.2f}]")
-            pct = min(s.drawdown_pct / s.threshold_pct, 1.0) if s.threshold_pct else 0
-            st.progress(pct, text=f"Drawdown {s.drawdown_pct:.2f}% / {s.threshold_pct}% threshold")
+            rows = []
+            for sym, s in statuses.items():
+                sc = state_color.get(s.state.value, "gray")
+                rows.append({
+                    "Symbol":   sym,
+                    "State":    s.state.value.upper(),
+                    "Entry":    f"${s.entry_price:.2f}",
+                    "Current":  f"${s.current_price:.2f}",
+                    "Peak":     f"${s.peak_price:.2f}",
+                    "Stop":     f"${s.stop_floor:.2f}",
+                    "Drawdown": f"{s.drawdown_pct:.2f}%",
+                    "P&L":      f"${s.pnl:+,.2f}",
+                    "Mode":     s.config.stop_mode.value.upper(),
+                    "ATR":      f"${s.atr_value:.2f}" if s.atr_value else "—",
+                    "BE":       "✓" if s.breakeven_active else "—",
+                    "TP":       "✓" if s.tp_executed else "—",
+                })
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
-        if s.log:
-            st.subheader("Activity Log")
-            log_data = [{"Time": e.timestamp.strftime("%H:%M:%S"),
-                         "Action": e.action,
-                         "Price": f"${e.price:.2f}",
-                         "Note": e.note} for e in reversed(s.log)]
-            st.dataframe(pd.DataFrame(log_data), use_container_width=True, hide_index=True)
+            # Per-position drawdown bars and stop buttons
+            active = [(sym, s) for sym, s in statuses.items()
+                      if s.state == TraderState.WATCHING]
+            if active:
+                for sym, s in active:
+                    with st.container(border=True):
+                        mc1, mc2, mc3, mc4, mc5 = st.columns([2, 2, 2, 2, 1])
+                        mc1.metric("Symbol",  sym)
+                        mc2.metric("Current", f"${s.current_price:.2f}",
+                                   delta=f"Entry ${s.entry_price:.2f}")
+                        mc3.metric("Peak",    f"${s.peak_price:.2f}")
+                        mc4.metric("Stop",    f"${s.stop_floor:.2f}")
+                        if mc5.button("Stop", key=f"stop_{sym}"):
+                            mt.stop(sym)
+                            st.rerun()
 
-        if s.state == TraderState.WATCHING:
-            time.sleep(at._poll_interval)
+                        pnl_color = "green" if s.pnl >= 0 else "red"
+                        st.markdown(f"**P&L:** :{pnl_color}[${s.pnl:+,.2f}]")
+                        pct = min(s.drawdown_pct / s.threshold_pct, 1.0) if s.threshold_pct else 0.0
+                        st.progress(pct, text=f"Drawdown {s.drawdown_pct:.2f}% / {s.threshold_pct:.2f}%")
+                        if s.breakeven_active:
+                            st.caption("Breakeven active — stop floor at entry")
+                        if s.tp_executed:
+                            st.caption("Take-profit executed — trailing remaining shares")
+
+            # Daily summary
+            st.divider()
+            dl1, dl2 = st.columns(2)
+            dl1.metric("Unrealized P&L (watching)", f"${mt.daily_pnl():+,.2f}")
+            dl2.metric("Realized losses today",     f"${mt.realized_losses():,.2f}")
+
+            # Combined log
+            all_logs = mt.all_logs()
+            if all_logs:
+                st.subheader("Activity Log")
+                log_data = [{"Time":   e.timestamp.strftime("%H:%M:%S"),
+                             "Action": e.action,
+                             "Price":  f"${e.price:.2f}" if e.price else "—",
+                             "Note":   e.note}
+                            for e in reversed(all_logs)]
+                st.dataframe(pd.DataFrame(log_data), use_container_width=True, hide_index=True)
+
+        # Auto-refresh while any position is watching
+        if any(s.state == TraderState.WATCHING for s in mt.statuses().values()):
+            time.sleep(5)
             st.rerun()
 
     # ── Page: Scanner ────────────────────────────────────────────────────────
