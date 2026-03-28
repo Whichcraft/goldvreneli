@@ -39,9 +39,12 @@ with st.sidebar:
 
     st.divider()
     st.subheader("Navigation")
+    # Allow programmatic navigation (e.g. Scanner → AutoTrader handoff)
+    if "nav_page" in st.session_state:
+        st.session_state["nav_radio"] = st.session_state.pop("nav_page")
     if broker == "Alpaca (Paper)":
         page = st.radio("", ["Portfolio", "AutoTrader", "Scanner", "Settings"],
-                        label_visibility="collapsed")
+                        label_visibility="collapsed", key="nav_radio")
     else:
         page = st.radio("", ["Portfolio", "Settings"],
                         label_visibility="collapsed")
@@ -341,7 +344,7 @@ if broker == "Alpaca (Paper)":
 
         with st.form("at_config"):
             c1, c2, c3, c4 = st.columns(4)
-            at_symbol    = c1.text_input("Symbol",           value=env_get("AT_SYMBOL", "AAPL")).upper()
+            at_symbol    = c1.text_input("Symbol",           value=st.session_state.pop("at_prefill", env_get("AT_SYMBOL", "AAPL"))).upper()
             at_qty       = c2.number_input("Qty",            min_value=1, value=1, step=1)
             at_threshold = c3.number_input("Trailing Stop %",min_value=0.1, max_value=10.0,
                                             value=float(env_get("AT_THRESHOLD", "0.5")), step=0.1,
@@ -433,26 +436,46 @@ if broker == "Alpaca (Paper)":
                 progress_bar.progress(done / total, text=f"Scanning {done}/{total}…")
 
             with st.spinner("Running scan…"):
-                results = scan(data_client, top_n=int(top_n), progress_cb=on_progress)
+                st.session_state.scan_results = scan(data_client, top_n=int(top_n), progress_cb=on_progress)
 
             progress_bar.empty()
 
-            if results.empty:
-                st.warning("No symbols passed all filters. Try again during market hours.")
-            else:
-                st.success(f"Found {len(results)} candidates.")
-                st.dataframe(results, use_container_width=True)
+        results = st.session_state.get("scan_results", pd.DataFrame())
 
-                fig_scan = go.Figure(go.Bar(
-                    x=results.index,
-                    y=results["5d Ret%"],
-                    marker_color=["green" if v >= 0 else "red" for v in results["5d Ret%"]],
-                    text=[f"{v:.2f}%" for v in results["5d Ret%"]],
-                    textposition="outside",
-                ))
-                fig_scan.update_layout(title="5-Day Return % — Top Candidates",
-                                       yaxis_title="5d Return %", height=350)
-                st.plotly_chart(fig_scan, use_container_width=True)
+        if not results.empty:
+            st.success(f"Found {len(results)} candidates. Click a row to select it.")
+
+            selection = st.dataframe(
+                results,
+                use_container_width=True,
+                on_select="rerun",
+                selection_mode="single-row",
+                key="scanner_table",
+            )
+
+            # Resolve selected symbol
+            selected_symbol = None
+            rows = selection.selection.get("rows", [])
+            if rows:
+                selected_symbol = results.index[rows[0]]
+                st.info(f"Selected: **{selected_symbol}**")
+                if st.button(f"▶ Send {selected_symbol} to AutoTrader", type="primary"):
+                    st.session_state.at_prefill = selected_symbol
+                    st.session_state.nav_page   = "AutoTrader"
+                    st.rerun()
+
+            fig_scan = go.Figure(go.Bar(
+                x=results.index,
+                y=results["5d Ret%"],
+                marker_color=["green" if v >= 0 else "red" for v in results["5d Ret%"]],
+                text=[f"{v:.2f}%" for v in results["5d Ret%"]],
+                textposition="outside",
+            ))
+            fig_scan.update_layout(title="5-Day Return % — Top Candidates",
+                                   yaxis_title="5d Return %", height=350)
+            st.plotly_chart(fig_scan, use_container_width=True)
+        elif not run_scan:
+            st.info("Run a scan to see candidates.")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # IBKR DASHBOARD
