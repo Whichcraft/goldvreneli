@@ -43,15 +43,18 @@ UNIVERSE = [
 UNIVERSE = list(dict.fromkeys(UNIVERSE))
 
 
-def fetch_bars(data_client, symbol: str, days: int = 60) -> Optional[pd.DataFrame]:
+def fetch_bars(data_client, symbol: str, days: int = 60,
+               as_of: Optional[datetime] = None) -> Optional[pd.DataFrame]:
     """Fetch daily bars for a symbol using Alpaca data client."""
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame
     try:
+        end = as_of or datetime.now()
         req = StockBarsRequest(
             symbol_or_symbols=symbol,
             timeframe=TimeFrame.Day,
-            start=datetime.now() - timedelta(days=days),
+            start=end - timedelta(days=days),
+            end=end,
         )
         bars = data_client.get_stock_bars(req).df
         if bars.empty:
@@ -123,11 +126,13 @@ def score_symbol(bars: pd.DataFrame) -> dict:
     }
 
 
-def scan(data_client, top_n: int = 10, progress_cb=None) -> pd.DataFrame:
+def scan(data_client, top_n: int = 10, progress_cb=None,
+         as_of: Optional[datetime] = None) -> pd.DataFrame:
     """
     Scan UNIVERSE, apply filters, return top_n candidates sorted by score.
 
     progress_cb : optional callable(done, total) for progress updates
+    as_of       : if set, fetch bars ending on this date (historical mode)
     """
     results = []
     total = len(UNIVERSE)
@@ -136,7 +141,7 @@ def scan(data_client, top_n: int = 10, progress_cb=None) -> pd.DataFrame:
         if progress_cb:
             progress_cb(i + 1, total)
 
-        bars = fetch_bars(data_client, symbol)
+        bars = fetch_bars(data_client, symbol, as_of=as_of)
         if bars is None:
             continue
 

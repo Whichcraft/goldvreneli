@@ -547,10 +547,13 @@ if broker == "Alpaca (Paper)":
         st.subheader("Position Scanner")
         st.caption("Scans ~60 liquid US stocks and ETFs, applies technical filters, proposes the top candidates.")
 
-        col_a, col_b = st.columns([1, 3])
+        col_a, col_b, col_c = st.columns([1, 2, 2])
         top_n    = col_a.number_input("Top N results", min_value=1, max_value=30,
                                        value=int(env_get("SCAN_TOP_N", "10")))
-        run_scan = col_b.button("Run Scan", type="primary")
+        use_hist = col_b.checkbox("Historical date", value=False)
+        as_of_date = col_c.date_input("As-of date", value=datetime.now().date(),
+                                       disabled=not use_hist)
+        run_scan = st.button("Run Scan", type="primary")
 
         with st.expander("Filters applied"):
             st.markdown(f"""
@@ -570,8 +573,10 @@ if broker == "Alpaca (Paper)":
             def on_progress(done, total):
                 progress_bar.progress(done / total, text=f"Scanning {done}/{total}…")
 
+            as_of_dt = datetime.combine(as_of_date, datetime.max.time()) if use_hist else None
             with st.spinner("Running scan…"):
-                st.session_state.scan_results = scan(data_client, top_n=int(top_n), progress_cb=on_progress)
+                st.session_state.scan_results = scan(data_client, top_n=int(top_n),
+                                                      progress_cb=on_progress, as_of=as_of_dt)
 
             progress_bar.empty()
 
