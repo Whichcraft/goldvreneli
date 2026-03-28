@@ -79,7 +79,7 @@ Get Alpaca paper API keys at [alpaca.markets](https://alpaca.markets) → Paper 
 
 ```bash
 source venv/bin/activate
-streamlit run app.py
+streamlit run goldvreneli.py
 ```
 
 Open [http://localhost:8501](http://localhost:8501) in your browser.
@@ -162,7 +162,7 @@ git push && git push --tags
 
 ```
 goldvreneli/
-├── app.py              # Streamlit dashboard (Portfolio, AutoTrader, Scanner)
+├── goldvreneli.py              # Streamlit dashboard (Portfolio, AutoTrader, Scanner)
 ├── autotrader.py       # Trailing-stop AutoTrader logic
 ├── scanner.py          # Technical position scanner
 ├── gateway_manager.py  # IB Gateway lifecycle (IBC + Xvfb)
