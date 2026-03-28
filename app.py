@@ -40,7 +40,7 @@ with st.sidebar:
 
     st.divider()
     st.subheader("Broker")
-    broker = st.radio("", ["Alpaca (Paper)", "IBKR"], label_visibility="collapsed")
+    broker = st.radio("Broker", ["Alpaca (Paper)", "IBKR"], label_visibility="collapsed")
 
     st.divider()
     st.subheader("Navigation")
@@ -48,10 +48,10 @@ with st.sidebar:
     if "nav_page" in st.session_state:
         st.session_state["nav_radio"] = st.session_state.pop("nav_page")
     if broker == "Alpaca (Paper)":
-        page = st.radio("", ["Portfolio", "AutoTrader", "Scanner", "Backtest", "Settings"],
+        page = st.radio("Navigation", ["Portfolio", "AutoTrader", "Scanner", "Backtest", "Settings"],
                         label_visibility="collapsed", key="nav_radio")
     else:
-        page = st.radio("", ["Portfolio", "Settings"],
+        page = st.radio("Navigation", ["Portfolio", "Settings"],
                         label_visibility="collapsed")
 
     st.divider()
@@ -235,7 +235,7 @@ if broker == "Alpaca (Paper)":
                 "P&L (%)":      f"{float(p.unrealized_plpc)*100:.2f}%",
                 "Side":         p.side.value,
             } for p in positions]
-            st.dataframe(pd.DataFrame(pos_data), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(pos_data), width="stretch", hide_index=True)
 
             fig = go.Figure(go.Bar(
                 x=[p.symbol for p in positions],
@@ -245,7 +245,7 @@ if broker == "Alpaca (Paper)":
                 textposition="outside",
             ))
             fig.update_layout(title="Unrealized P&L by Position", yaxis_title="P&L ($)", height=350)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
         else:
             st.info("No open positions.")
 
@@ -273,7 +273,7 @@ if broker == "Alpaca (Paper)":
                     ))
                     fig2.update_layout(title=f"{chart_symbol} — {timeframe_opt}",
                                        xaxis_rangeslider_visible=False, height=400)
-                    st.plotly_chart(fig2, use_container_width=True)
+                    st.plotly_chart(fig2, width="stretch")
             except Exception as e:
                 st.error(f"Chart error: {e}")
 
@@ -317,7 +317,7 @@ if broker == "Alpaca (Paper)":
                 "Filled": float(o.filled_qty),
                 "Limit":  f"${float(o.limit_price):.2f}" if o.limit_price else "—",
                 "Status": o.status.value,
-            } for o in open_orders]), use_container_width=True, hide_index=True)
+            } for o in open_orders]), width="stretch", hide_index=True)
             if st.button("Cancel All Orders", type="secondary"):
                 trading_client.cancel_orders()
                 st.success("All open orders cancelled.")
@@ -493,7 +493,7 @@ if broker == "Alpaca (Paper)":
                     "BE":       "✓" if s.breakeven_active else "—",
                     "TP":       "✓" if s.tp_executed else "—",
                 })
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
             # Per-position drawdown bars and stop buttons
             active = [(sym, s) for sym, s in statuses.items()
@@ -535,7 +535,7 @@ if broker == "Alpaca (Paper)":
                              "Price":  f"${e.price:.2f}" if e.price else "—",
                              "Note":   e.note}
                             for e in reversed(all_logs)]
-                st.dataframe(pd.DataFrame(log_data), use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(log_data), width="stretch", hide_index=True)
 
         # Auto-refresh while any position is watching
         if any(s.state == TraderState.WATCHING for s in mt.statuses().values()):
@@ -547,10 +547,13 @@ if broker == "Alpaca (Paper)":
         st.subheader("Position Scanner")
         st.caption("Scans ~60 liquid US stocks and ETFs, applies technical filters, proposes the top candidates.")
 
-        col_a, col_b = st.columns([1, 3])
+        col_a, col_b, col_c = st.columns([1, 2, 2])
         top_n    = col_a.number_input("Top N results", min_value=1, max_value=30,
                                        value=int(env_get("SCAN_TOP_N", "10")))
-        run_scan = col_b.button("Run Scan", type="primary")
+        use_hist = col_b.checkbox("Historical date", value=False)
+        as_of_date = col_c.date_input("As-of date", value=datetime.now().date(),
+                                       disabled=not use_hist)
+        run_scan = st.button("Run Scan", type="primary")
 
         with st.expander("Filters applied"):
             st.markdown(f"""
@@ -570,8 +573,10 @@ if broker == "Alpaca (Paper)":
             def on_progress(done, total):
                 progress_bar.progress(done / total, text=f"Scanning {done}/{total}…")
 
+            as_of_dt = datetime.combine(as_of_date, datetime.max.time()) if use_hist else None
             with st.spinner("Running scan…"):
-                st.session_state.scan_results = scan(data_client, top_n=int(top_n), progress_cb=on_progress)
+                st.session_state.scan_results = scan(data_client, top_n=int(top_n),
+                                                      progress_cb=on_progress, as_of=as_of_dt)
 
             progress_bar.empty()
 
@@ -582,7 +587,7 @@ if broker == "Alpaca (Paper)":
 
             selection = st.dataframe(
                 results,
-                use_container_width=True,
+                width="stretch",
                 on_select="rerun",
                 selection_mode="single-row",
                 key="scanner_table",
@@ -608,7 +613,7 @@ if broker == "Alpaca (Paper)":
             ))
             fig_scan.update_layout(title="5-Day Return % — Top Candidates",
                                    yaxis_title="5d Return %", height=350)
-            st.plotly_chart(fig_scan, use_container_width=True)
+            st.plotly_chart(fig_scan, width="stretch")
         elif not run_scan:
             st.info("Run a scan to see candidates.")
 
@@ -831,7 +836,7 @@ if broker == "Alpaca (Paper)":
                     "Price":  f"${e.price:.2f}" if e.price else "—",
                     "Note":   e.note,
                 } for e in reversed(s.log)])
-                st.dataframe(log_df, use_container_width=True, hide_index=True)
+                st.dataframe(log_df, width="stretch", hide_index=True)
 
             if s.state == TraderState.WATCHING:
                 time.sleep(1)
@@ -861,7 +866,7 @@ if broker == "Alpaca (Paper)":
                     "Sells":    len(sells),
                     "P&L":      f"${s['pnl']:+,.2f}" if s.get("pnl") is not None else "—",
                 })
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
             # Expandable fills per session
             for s in sessions[:5]:   # show last 5
@@ -873,7 +878,7 @@ if broker == "Alpaca (Paper)":
                          f"{s.get('meta',{}).get('symbol','?')}  "
                          f"P&L {pnl_str}")
                 with st.expander(label):
-                    st.dataframe(pd.DataFrame(fills), use_container_width=True, hide_index=True)
+                    st.dataframe(pd.DataFrame(fills), width="stretch", hide_index=True)
         else:
             st.info(f"No sessions recorded yet in `{DEFAULT_FILLS}`.")
 
@@ -991,7 +996,7 @@ else:
             "Exchange": p.contract.exchange,
             "Qty":      p.position,
             "Avg Cost": f"${p.avgCost:.2f}",
-        } for p in positions]), use_container_width=True, hide_index=True)
+        } for p in positions]), width="stretch", hide_index=True)
 
         fig = go.Figure(go.Bar(
             x=[p.contract.symbol for p in positions],
@@ -1000,7 +1005,7 @@ else:
             textposition="outside",
         ))
         fig.update_layout(title="Position Sizes", yaxis_title="Qty", height=350)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
     else:
         st.info("No open positions.")
 
@@ -1041,7 +1046,7 @@ else:
             "Qty":    t.order.totalQuantity,
             "Filled": t.orderStatus.filled,
             "Status": t.orderStatus.status,
-        } for t in open_trades]), use_container_width=True, hide_index=True)
+        } for t in open_trades]), width="stretch", hide_index=True)
 
         if st.button("Cancel All Orders", type="secondary"):
             for t in open_trades:
