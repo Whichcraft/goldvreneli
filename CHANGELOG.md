@@ -8,6 +8,40 @@ All notable changes to this project will be documented here.
 
 ---
 
+## [0.7.0] — 2026-03-28
+
+### Added
+- AutoTrader: ATR-based trailing stop (N × ATR(14) dollars, adapts to volatility)
+- AutoTrader: take-profit target (sell configurable fraction when profit hits %)
+- AutoTrader: breakeven stop (raise stop floor to entry once up X %)
+- AutoTrader: time stop (exit after N minutes)
+- AutoTrader: limit entry mode (wait for price ≤ target within timeout)
+- AutoTrader: scale-in entry mode (buy in N tranches at configurable intervals)
+- `size_from_risk()` helper to compute qty from account equity and risk %
+- `MultiTrader`: manage multiple concurrent positions keyed by symbol
+- `MultiTrader`: daily loss limit (halt new trades when realized losses exceed threshold)
+- UI: positions table with per-symbol drawdown bars, stop buttons, P&L, ATR/BE/TP indicators
+- UI: risk-based position sizing calculator in the AutoTrader form
+- UI: daily P&L and realized-losses summary metrics
+- Settings: Daily Loss Limit field (`AT_DAILY_LOSS_LIMIT`)
+
+---
+
+## [0.6.0] — 2026-03-28
+
+### Added
+- Scanner results are now selectable (single-row); a "Send to AutoTrader" button pre-fills the AutoTrader symbol and navigates to the AutoTrader page automatically.
+
+---
+
+## [0.5.1] — 2026-03-28
+
+---
+
+## [0.5.0] — 2026-03-28
+
+---
+
 ## [0.4.0] — 2026-03-28
 
 ### Added

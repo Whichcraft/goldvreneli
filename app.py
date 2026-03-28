@@ -3,35 +3,71 @@ import time
 import streamlit as st
 import plotly.graph_objects as go
 import pandas as pd
-from dotenv import load_dotenv
+from dotenv import load_dotenv, dotenv_values, set_key
 
 load_dotenv()
 
 from version import __version__
-from autotrader import AutoTrader, TraderState
+from autotrader import (
+    AutoTrader, MultiTrader, TraderConfig, TraderState,
+    StopMode, EntryMode, size_from_risk,
+)
 from scanner import scan
+
+ENV_FILE = os.path.join(os.path.dirname(__file__), ".env")
 
 # ── Config ────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title=f"Goldvreneli Trading v{__version__}", layout="wide")
 
-# ── Sidebar: broker selection ─────────────────────────────────────────────────
+# ── .env helpers ──────────────────────────────────────────────────────────────
+def env_get(key: str, default: str = "") -> str:
+    return os.environ.get(key, dotenv_values(ENV_FILE).get(key, default))
+
+def env_save(values: dict):
+    """Write multiple key=value pairs to .env and reload into os.environ."""
+    if not os.path.exists(ENV_FILE):
+        open(ENV_FILE, "w").close()
+    for k, v in values.items():
+        set_key(ENV_FILE, k, v)
+        os.environ[k] = v
+
+# ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.title("Goldvreneli")
     st.caption(f"v{__version__}")
-    broker = st.radio("Broker", ["Alpaca (Paper)", "IBKR"])
 
+    st.divider()
+    st.subheader("Broker")
+    broker = st.radio("", ["Alpaca (Paper)", "IBKR"], label_visibility="collapsed")
+
+    st.divider()
+    st.subheader("Navigation")
+    # Allow programmatic navigation (e.g. Scanner → AutoTrader handoff)
+    if "nav_page" in st.session_state:
+        st.session_state["nav_radio"] = st.session_state.pop("nav_page")
     if broker == "Alpaca (Paper)":
-        api_key    = st.text_input("API Key",    value=os.environ.get("ALPACA_PAPER_API_KEY", ""),    type="password")
-        secret_key = st.text_input("Secret Key", value=os.environ.get("ALPACA_PAPER_SECRET_KEY", ""), type="password")
-        if not api_key or not secret_key:
-            st.warning("Enter your Alpaca paper API keys.")
-            st.stop()
+        page = st.radio("", ["Portfolio", "AutoTrader", "Scanner", "Settings"],
+                        label_visibility="collapsed", key="nav_radio")
     else:
-        ibkr_user = st.text_input("IBKR Username", value=os.environ.get("IBKR_USERNAME", ""))
-        ibkr_pass = st.text_input("IBKR Password", value=os.environ.get("IBKR_PASSWORD", ""), type="password")
-        trading_mode = st.selectbox("Mode", ["paper", "live"])
-        ibkr_client_id = st.number_input("Client ID", value=1)
-        st.caption("Paper port: 4002 | Live port: 4001")
+        page = st.radio("", ["Portfolio", "Settings"],
+                        label_visibility="collapsed")
+
+    st.divider()
+    with st.expander("About"):
+        st.markdown(f"""
+**Goldvreneli Trading**
+Version `{__version__}`
+
+**Features**
+- Portfolio overview & orders
+- AutoTrader (trailing stop)
+- Position Scanner
+- Settings (save API keys & config)
+
+**Brokers**
+- Alpaca Paper Trading
+- IBKR (via IB Gateway)
+        """)
 
 # ── Alpaca helpers ────────────────────────────────────────────────────────────
 @st.cache_resource
@@ -43,7 +79,7 @@ def get_alpaca_clients(api_key, secret_key):
     return trading, data
 
 # ── IBKR helpers ──────────────────────────────────────────────────────────────
-def get_gateway():
+def get_gateway(ibkr_user, ibkr_pass, trading_mode):
     if "gateway" not in st.session_state:
         from gateway_manager import GatewayManager
         st.session_state.gateway = GatewayManager(
@@ -60,6 +96,94 @@ def get_ib():
     return st.session_state.ib
 
 # ══════════════════════════════════════════════════════════════════════════════
+# SETTINGS PAGE (shared by both brokers)
+# ══════════════════════════════════════════════════════════════════════════════
+if page == "Settings":
+    st.title("Settings")
+
+    with st.form("settings_form"):
+
+        # ── Alpaca ────────────────────────────────────────────────────────────
+        st.subheader("Alpaca Paper Trading")
+        c1, c2 = st.columns(2)
+        f_alpaca_key    = c1.text_input("API Key",    value=env_get("ALPACA_PAPER_API_KEY"),    type="password")
+        f_alpaca_secret = c2.text_input("Secret Key", value=env_get("ALPACA_PAPER_SECRET_KEY"), type="password")
+
+        st.divider()
+
+        # ── IBKR ──────────────────────────────────────────────────────────────
+        st.subheader("IBKR")
+        c1, c2, c3 = st.columns(3)
+        f_ibkr_user    = c1.text_input("Username",     value=env_get("IBKR_USERNAME"))
+        f_ibkr_pass    = c2.text_input("Password",     value=env_get("IBKR_PASSWORD"),  type="password")
+        f_ibkr_mode    = c3.selectbox("Trading Mode",  ["paper", "live"],
+                                       index=0 if env_get("IBKR_MODE", "paper") == "paper" else 1)
+        c4, c5 = st.columns(2)
+        f_ibc_path     = c4.text_input("IBC Path",     value=env_get("IBC_PATH",     "~/ibc"))
+        f_gateway_path = c5.text_input("Gateway Path", value=env_get("GATEWAY_PATH", "~/Jts/ibgateway"))
+
+        st.divider()
+
+        # ── AutoTrader defaults ───────────────────────────────────────────────
+        st.subheader("AutoTrader Defaults")
+        c1, c2, c3, c4 = st.columns(4)
+        f_at_symbol    = c1.text_input("Default Symbol",         value=env_get("AT_SYMBOL",    "AAPL"))
+        f_at_threshold = c2.number_input("Trailing Stop %",      min_value=0.1, max_value=10.0,
+                                          value=float(env_get("AT_THRESHOLD", "0.5")), step=0.1)
+        f_at_poll      = c3.number_input("Poll Interval (s)",    min_value=1,
+                                          value=int(env_get("AT_POLL", "5")),           step=1)
+        f_at_loss_lim  = c4.number_input("Daily Loss Limit ($)", min_value=0.0,
+                                          value=float(env_get("AT_DAILY_LOSS_LIMIT", "0")), step=100.0,
+                                          help="Stop new trades when realized losses reach this amount. 0 = disabled.")
+
+        st.divider()
+
+        # ── Scanner defaults ──────────────────────────────────────────────────
+        st.subheader("Scanner Defaults")
+        c1, c2, c3, c4 = st.columns(4)
+        f_scan_n       = c1.number_input("Top N results",        min_value=1, max_value=30,
+                                          value=int(env_get("SCAN_TOP_N", "10")))
+        f_scan_rsi_lo  = c2.number_input("RSI min",              min_value=1,  max_value=99,
+                                          value=int(env_get("SCAN_RSI_LO", "40")))
+        f_scan_rsi_hi  = c3.number_input("RSI max",              min_value=1,  max_value=99,
+                                          value=int(env_get("SCAN_RSI_HI", "65")))
+        f_scan_vol_mult= c4.number_input("Volume multiplier",    min_value=0.1, max_value=10.0,
+                                          value=float(env_get("SCAN_VOL_MULT", "1.5")), step=0.1)
+
+        st.divider()
+        saved = st.form_submit_button("Save Settings", type="primary")
+
+    if saved:
+        env_save({
+            "ALPACA_PAPER_API_KEY":    f_alpaca_key,
+            "ALPACA_PAPER_SECRET_KEY": f_alpaca_secret,
+            "IBKR_USERNAME":           f_ibkr_user,
+            "IBKR_PASSWORD":           f_ibkr_pass,
+            "IBKR_MODE":               f_ibkr_mode,
+            "IBC_PATH":                f_ibc_path,
+            "GATEWAY_PATH":            f_gateway_path,
+            "AT_SYMBOL":               f_at_symbol,
+            "AT_THRESHOLD":            str(f_at_threshold),
+            "AT_POLL":                 str(f_at_poll),
+            "AT_DAILY_LOSS_LIMIT":     str(f_at_loss_lim),
+            "SCAN_TOP_N":              str(f_scan_n),
+            "SCAN_RSI_LO":             str(f_scan_rsi_lo),
+            "SCAN_RSI_HI":             str(f_scan_rsi_hi),
+            "SCAN_VOL_MULT":           str(f_scan_vol_mult),
+        })
+        # Clear cached clients so they reconnect with new keys
+        get_alpaca_clients.clear()
+        # Reset IBKR auto-start flags so gateway restarts with new credentials
+        st.session_state.pop("gw_start_attempted", None)
+        st.session_state.pop("ib_connect_attempted", None)
+        if "gateway" in st.session_state:
+            del st.session_state["gateway"]
+        st.success("Settings saved to .env")
+        st.rerun()
+
+    st.stop()
+
+# ══════════════════════════════════════════════════════════════════════════════
 # ALPACA DASHBOARD
 # ══════════════════════════════════════════════════════════════════════════════
 if broker == "Alpaca (Paper)":
@@ -68,6 +192,13 @@ if broker == "Alpaca (Paper)":
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame
     from datetime import datetime, timedelta
+
+    api_key    = env_get("ALPACA_PAPER_API_KEY")
+    secret_key = env_get("ALPACA_PAPER_SECRET_KEY")
+
+    if not api_key or not secret_key:
+        st.warning("API keys not configured. Go to **Settings** to add them.")
+        st.stop()
 
     try:
         trading_client, data_client = get_alpaca_clients(api_key, secret_key)
@@ -79,10 +210,8 @@ if broker == "Alpaca (Paper)":
 
     st.title("Portfolio Dashboard (Alpaca Paper)")
 
-    tab_portfolio, tab_autotrader, tab_scanner = st.tabs(["Portfolio", "AutoTrader", "Scanner"])
-
-    # ── Tab: Portfolio ────────────────────────────────────────────────────────
-    with tab_portfolio:
+    # ── Page: Portfolio ───────────────────────────────────────────────────────
+    if page == "Portfolio":
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Portfolio Value", f"${float(account.portfolio_value):,.2f}")
         col2.metric("Cash",            f"${float(account.cash):,.2f}")
@@ -91,7 +220,6 @@ if broker == "Alpaca (Paper)":
 
         st.divider()
 
-        # Positions
         st.subheader("Open Positions")
         positions = trading_client.get_all_positions()
         if positions:
@@ -121,7 +249,6 @@ if broker == "Alpaca (Paper)":
 
         st.divider()
 
-        # Price chart
         st.subheader("Price Chart")
         chart_symbol  = st.text_input("Symbol", value="AAPL").upper()
         timeframe_opt = st.selectbox("Timeframe", ["1D", "1W", "1M", "3M"], index=2)
@@ -150,7 +277,6 @@ if broker == "Alpaca (Paper)":
 
         st.divider()
 
-        # Place Order
         st.subheader("Place Order")
         with st.form("order_form"):
             c1, c2, c3, c4, c5 = st.columns(5)
@@ -177,7 +303,6 @@ if broker == "Alpaca (Paper)":
 
         st.divider()
 
-        # Open Orders
         st.subheader("Open Orders")
         open_orders = trading_client.get_orders(filter=GetOrdersRequest(status=QueryOrderStatus.OPEN))
         if open_orders:
@@ -198,12 +323,11 @@ if broker == "Alpaca (Paper)":
         else:
             st.info("No open orders.")
 
-    # ── Tab: AutoTrader ───────────────────────────────────────────────────────
-    with tab_autotrader:
-        st.subheader("AutoTrader — Trailing Stop")
-        st.caption("Buys a position and sells automatically when price drops below the trailing stop threshold.")
+    # ── Page: AutoTrader ─────────────────────────────────────────────────────
+    elif page == "AutoTrader":
+        st.subheader("AutoTrader — Multi-Position Manager")
+        st.caption("Enters positions and exits automatically via trailing stop, take-profit, breakeven, or time stop.")
 
-        # Alpaca price fetcher
         def alpaca_get_price(symbol: str) -> float:
             from alpaca.data.requests import StockLatestQuoteRequest
             quote = data_client.get_stock_latest_quote(StockLatestQuoteRequest(symbol_or_symbols=symbol))
@@ -221,102 +345,218 @@ if broker == "Alpaca (Paper)":
                 side=OrderSide.SELL, time_in_force=TimeInForce.DAY
             ))
 
-        # Init AutoTrader in session state
-        if "autotrader" not in st.session_state:
-            st.session_state.autotrader = AutoTrader(
-                get_price=alpaca_get_price,
-                place_buy=alpaca_buy,
-                place_sell=alpaca_sell,
-            )
-        at = st.session_state.autotrader
-        s  = at.status
+        def alpaca_get_bars(symbol: str) -> pd.DataFrame:
+            bars = data_client.get_stock_bars(StockBarsRequest(
+                symbol_or_symbols=symbol,
+                timeframe=TimeFrame.Day,
+                start=datetime.now() - timedelta(days=30),
+            )).df
+            bars = bars.reset_index(level=0, drop=True)
+            return bars[["open", "high", "low", "close", "volume"]]
 
-        # Config form
+        # Migrate old single-trader session key
+        if "autotrader" in st.session_state and "multitrader" not in st.session_state:
+            del st.session_state["autotrader"]
+
+        if "multitrader" not in st.session_state:
+            st.session_state.multitrader = MultiTrader(
+                get_price        = alpaca_get_price,
+                place_buy        = alpaca_buy,
+                place_sell       = alpaca_sell,
+                get_bars         = alpaca_get_bars,
+                daily_loss_limit = float(env_get("AT_DAILY_LOSS_LIMIT", "0")),
+            )
+        mt = st.session_state.multitrader
+
+        # ── New position form ─────────────────────────────────────────────
         with st.form("at_config"):
-            c1, c2, c3, c4 = st.columns(4)
-            at_symbol    = c1.text_input("Symbol", value="AAPL").upper()
-            at_qty       = c2.number_input("Qty", min_value=1, value=1, step=1)
-            at_threshold = c3.number_input("Trailing Stop %", min_value=0.1, max_value=10.0,
-                                            value=0.5, step=0.1,
-                                            help="Sell when price drops this % below peak")
-            at_poll      = c4.number_input("Poll interval (s)", min_value=1, value=5, step=1)
-            col_start, col_stop = st.columns(2)
-            start_btn = col_start.form_submit_button("▶ Start AutoTrader", type="primary")
-            stop_btn  = col_stop.form_submit_button("⏹ Stop")
+            st.markdown("**New Position**")
+            c1, c2, c3 = st.columns(3)
+            at_symbol   = c1.text_input(
+                "Symbol",
+                value=st.session_state.pop("at_prefill", env_get("AT_SYMBOL", "AAPL")),
+            ).upper()
+            at_stop_mode = c2.selectbox("Stop Mode", ["PCT", "ATR"],
+                                        help="PCT = fixed %; ATR = N × ATR(14) dollars")
+            at_stop_val  = c3.number_input(
+                "Trailing Stop % " if True else "ATR Multiplier",
+                min_value=0.1, max_value=20.0,
+                value=float(env_get("AT_THRESHOLD", "0.5")), step=0.1,
+                help="For PCT: % drop from peak triggers sell. For ATR: multiplier × ATR(14).",
+            )
+
+            # Risk-based sizing
+            use_risk_sizing = st.checkbox("Size position by risk %", value=False)
+            if use_risk_sizing:
+                rc1, rc2, rc3 = st.columns(3)
+                at_equity    = rc1.number_input("Account equity ($)", min_value=1.0, value=10000.0, step=500.0)
+                at_risk_pct  = rc2.number_input("Risk per trade (%)", min_value=0.1, max_value=10.0, value=1.0, step=0.1)
+                at_entry_est = rc3.number_input("Est. entry price ($)", min_value=0.01, value=100.0, step=1.0)
+                # Compute stop distance from the chosen mode/value
+                stop_dist_est = at_entry_est * at_stop_val / 100
+                at_qty = size_from_risk(at_equity, at_risk_pct, at_entry_est, stop_dist_est)
+                st.caption(f"Computed qty: **{at_qty}** shares "
+                           f"(risking ${at_equity * at_risk_pct / 100:,.2f} @ ${stop_dist_est:.2f} stop distance)")
+            else:
+                at_qty = st.number_input("Qty (shares)", min_value=1, value=1, step=1)
+
+            at_poll = st.number_input("Poll interval (s)", min_value=1,
+                                      value=int(env_get("AT_POLL", "5")), step=1)
+
+            with st.expander("Entry mode"):
+                at_entry_mode    = st.selectbox("Entry", ["MARKET", "LIMIT", "SCALE"])
+                ec1, ec2         = st.columns(2)
+                at_limit_price   = ec1.number_input("Limit price ($)", min_value=0.0, value=0.0, step=0.01,
+                                                     disabled=(at_entry_mode != "LIMIT"))
+                at_limit_timeout = ec2.number_input("Limit timeout (s)", min_value=5, value=60, step=5,
+                                                     disabled=(at_entry_mode != "LIMIT"))
+                sc1, sc2         = st.columns(2)
+                at_scale_n       = sc1.number_input("Tranches", min_value=2, max_value=10, value=3, step=1,
+                                                     disabled=(at_entry_mode != "SCALE"))
+                at_scale_ivl     = sc2.number_input("Interval between tranches (s)", min_value=5,
+                                                     value=30, step=5, disabled=(at_entry_mode != "SCALE"))
+
+            with st.expander("Exit targets"):
+                xc1, xc2         = st.columns(2)
+                at_tp_pct        = xc1.number_input("Take-profit trigger (%)", min_value=0.0, value=0.0, step=0.1,
+                                                     help="0 = disabled. Sell at_tp_fraction of position when up this %.")
+                at_tp_frac       = xc2.slider("Fraction to sell at take-profit", min_value=0.1,
+                                               max_value=1.0, value=1.0, step=0.1)
+                xc3, xc4         = st.columns(2)
+                at_be_pct        = xc3.number_input("Breakeven trigger (%)", min_value=0.0, value=0.0, step=0.1,
+                                                     help="0 = disabled. Once up this %, move stop floor to entry price.")
+                at_time_stop     = xc4.number_input("Time stop (minutes)", min_value=0, value=0, step=5,
+                                                     help="0 = disabled. Exit after this many minutes.")
+
+            col_start, col_stop_all = st.columns(2)
+            start_btn    = col_start.form_submit_button("▶ Start", type="primary")
+            stop_all_btn = col_stop_all.form_submit_button("⏹ Stop All")
 
         if start_btn:
-            if s.state == TraderState.WATCHING:
-                st.warning("AutoTrader already running.")
-            else:
-                at._poll_interval = at_poll
-                try:
-                    at.start(at_symbol, int(at_qty), threshold_pct=at_threshold)
-                    st.success(f"AutoTrader started: {at_symbol} | Stop at {at_threshold}%")
-                except Exception as e:
-                    st.error(f"Failed to start: {e}")
+            cfg = TraderConfig(
+                stop_mode             = StopMode(at_stop_mode.lower()),
+                stop_value            = at_stop_val,
+                poll_interval         = float(at_poll),
+                entry_mode            = EntryMode(at_entry_mode.lower()),
+                limit_price           = at_limit_price,
+                limit_timeout_s       = float(at_limit_timeout),
+                scale_tranches        = at_scale_n,
+                scale_interval_s      = float(at_scale_ivl),
+                tp_trigger_pct        = at_tp_pct,
+                tp_qty_fraction       = at_tp_frac,
+                breakeven_trigger_pct = at_be_pct,
+                time_stop_minutes     = float(at_time_stop),
+            )
+            try:
+                mt.start(at_symbol, int(at_qty), config=cfg)
+                st.success(f"Started {at_symbol} — {at_stop_mode} stop @ {at_stop_val}")
+            except Exception as e:
+                st.error(str(e))
             st.rerun()
 
-        if stop_btn and s.state == TraderState.WATCHING:
-            at.stop()
-            st.info("AutoTrader stopped.")
+        if stop_all_btn:
+            mt.stop_all()
+            st.info("All positions stopped.")
             st.rerun()
 
-        # Status panel
-        state_color = {
-            TraderState.IDLE:     "gray",
-            TraderState.WATCHING: "green",
-            TraderState.SOLD:     "blue",
-            TraderState.STOPPED:  "orange",
-            TraderState.ERROR:    "red",
-        }
-        st.markdown(f"**Status:** :{state_color[s.state]}[{s.state.value.upper()}]")
+        # ── Positions table ───────────────────────────────────────────────
+        statuses = mt.statuses()
+        if statuses:
+            state_color = {
+                "idle":     "gray",
+                "entering": "blue",
+                "watching": "green",
+                "sold":     "blue",
+                "stopped":  "orange",
+                "error":    "red",
+            }
 
-        if s.state in (TraderState.WATCHING, TraderState.SOLD, TraderState.STOPPED):
-            m1, m2, m3, m4, m5 = st.columns(5)
-            m1.metric("Symbol",      s.symbol)
-            m2.metric("Entry",       f"${s.entry_price:.2f}")
-            m3.metric("Peak",        f"${s.peak_price:.2f}")
-            m4.metric("Current",     f"${s.current_price:.2f}")
-            m5.metric("Drawdown",    f"{s.drawdown_pct:.2f}%",
-                      delta=f"Stop @ {s.threshold_pct}%", delta_color="inverse")
+            st.divider()
+            st.subheader("Positions")
 
-            pnl_color = "green" if s.pnl >= 0 else "red"
-            st.markdown(f"**P&L:** :{pnl_color}[${s.pnl:,.2f}]")
+            rows = []
+            for sym, s in statuses.items():
+                sc = state_color.get(s.state.value, "gray")
+                rows.append({
+                    "Symbol":   sym,
+                    "State":    s.state.value.upper(),
+                    "Entry":    f"${s.entry_price:.2f}",
+                    "Current":  f"${s.current_price:.2f}",
+                    "Peak":     f"${s.peak_price:.2f}",
+                    "Stop":     f"${s.stop_floor:.2f}",
+                    "Drawdown": f"{s.drawdown_pct:.2f}%",
+                    "P&L":      f"${s.pnl:+,.2f}",
+                    "Mode":     s.config.stop_mode.value.upper(),
+                    "ATR":      f"${s.atr_value:.2f}" if s.atr_value else "—",
+                    "BE":       "✓" if s.breakeven_active else "—",
+                    "TP":       "✓" if s.tp_executed else "—",
+                })
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
-            # Progress bar: drawdown vs threshold
-            pct = min(s.drawdown_pct / s.threshold_pct, 1.0) if s.threshold_pct else 0
-            st.progress(pct, text=f"Drawdown {s.drawdown_pct:.2f}% / {s.threshold_pct}% threshold")
+            # Per-position drawdown bars and stop buttons
+            active = [(sym, s) for sym, s in statuses.items()
+                      if s.state == TraderState.WATCHING]
+            if active:
+                for sym, s in active:
+                    with st.container(border=True):
+                        mc1, mc2, mc3, mc4, mc5 = st.columns([2, 2, 2, 2, 1])
+                        mc1.metric("Symbol",  sym)
+                        mc2.metric("Current", f"${s.current_price:.2f}",
+                                   delta=f"Entry ${s.entry_price:.2f}")
+                        mc3.metric("Peak",    f"${s.peak_price:.2f}")
+                        mc4.metric("Stop",    f"${s.stop_floor:.2f}")
+                        if mc5.button("Stop", key=f"stop_{sym}"):
+                            mt.stop(sym)
+                            st.rerun()
 
-        # Activity log
-        if s.log:
-            st.subheader("Activity Log")
-            log_data = [{"Time": e.timestamp.strftime("%H:%M:%S"),
-                         "Action": e.action,
-                         "Price": f"${e.price:.2f}",
-                         "Note": e.note} for e in reversed(s.log)]
-            st.dataframe(pd.DataFrame(log_data), use_container_width=True, hide_index=True)
+                        pnl_color = "green" if s.pnl >= 0 else "red"
+                        st.markdown(f"**P&L:** :{pnl_color}[${s.pnl:+,.2f}]")
+                        pct = min(s.drawdown_pct / s.threshold_pct, 1.0) if s.threshold_pct else 0.0
+                        st.progress(pct, text=f"Drawdown {s.drawdown_pct:.2f}% / {s.threshold_pct:.2f}%")
+                        if s.breakeven_active:
+                            st.caption("Breakeven active — stop floor at entry")
+                        if s.tp_executed:
+                            st.caption("Take-profit executed — trailing remaining shares")
 
-        # Auto-refresh while watching
-        if s.state == TraderState.WATCHING:
-            time.sleep(at._poll_interval)
+            # Daily summary
+            st.divider()
+            dl1, dl2 = st.columns(2)
+            dl1.metric("Unrealized P&L (watching)", f"${mt.daily_pnl():+,.2f}")
+            dl2.metric("Realized losses today",     f"${mt.realized_losses():,.2f}")
+
+            # Combined log
+            all_logs = mt.all_logs()
+            if all_logs:
+                st.subheader("Activity Log")
+                log_data = [{"Time":   e.timestamp.strftime("%H:%M:%S"),
+                             "Action": e.action,
+                             "Price":  f"${e.price:.2f}" if e.price else "—",
+                             "Note":   e.note}
+                            for e in reversed(all_logs)]
+                st.dataframe(pd.DataFrame(log_data), use_container_width=True, hide_index=True)
+
+        # Auto-refresh while any position is watching
+        if any(s.state == TraderState.WATCHING for s in mt.statuses().values()):
+            time.sleep(5)
             st.rerun()
 
-    # ── Tab: Scanner ──────────────────────────────────────────────────────────
-    with tab_scanner:
+    # ── Page: Scanner ────────────────────────────────────────────────────────
+    elif page == "Scanner":
         st.subheader("Position Scanner")
-        st.caption("Scans ~60 liquid US stocks and ETFs, applies technical filters, proposes the top 10.")
+        st.caption("Scans ~60 liquid US stocks and ETFs, applies technical filters, proposes the top candidates.")
 
         col_a, col_b = st.columns([1, 3])
-        top_n   = col_a.number_input("Top N results", min_value=1, max_value=30, value=10)
+        top_n    = col_a.number_input("Top N results", min_value=1, max_value=30,
+                                       value=int(env_get("SCAN_TOP_N", "10")))
         run_scan = col_b.button("Run Scan", type="primary")
 
         with st.expander("Filters applied"):
-            st.markdown("""
+            st.markdown(f"""
 | Filter | Condition |
 |--------|-----------|
-| Price  | > SMA20 and > SMA50 (uptrend) |
-| RSI(14)| 40 – 65 (momentum, not overbought) |
-| Volume | > 1.5× 20-day average |
+| Trend | Price > SMA20 and SMA50 |
+| RSI(14) | {env_get("SCAN_RSI_LO", "40")} – {env_get("SCAN_RSI_HI", "65")} |
+| Volume | > {env_get("SCAN_VOL_MULT", "1.5")}× 20-day average |
 | Liquidity | Price > $5, ADV > $5M |
 | Momentum | 5-day return > 0% |
 | Score | Weighted: 5d return × 2, 20d return × 0.5, RSI quality, MACD histogram |
@@ -324,33 +564,51 @@ if broker == "Alpaca (Paper)":
 
         if run_scan:
             progress_bar = st.progress(0, text="Scanning…")
-            status_text  = st.empty()
 
             def on_progress(done, total):
                 progress_bar.progress(done / total, text=f"Scanning {done}/{total}…")
 
             with st.spinner("Running scan…"):
-                results = scan(data_client, top_n=int(top_n), progress_cb=on_progress)
+                st.session_state.scan_results = scan(data_client, top_n=int(top_n), progress_cb=on_progress)
 
             progress_bar.empty()
 
-            if results.empty:
-                st.warning("No symbols passed all filters. Try again during market hours.")
-            else:
-                st.success(f"Found {len(results)} candidates.")
-                st.dataframe(results, use_container_width=True)
+        results = st.session_state.get("scan_results", pd.DataFrame())
 
-                # Bar chart: 5d return
-                fig_scan = go.Figure(go.Bar(
-                    x=results.index,
-                    y=results["5d Ret%"],
-                    marker_color=["green" if v >= 0 else "red" for v in results["5d Ret%"]],
-                    text=[f"{v:.2f}%" for v in results["5d Ret%"]],
-                    textposition="outside",
-                ))
-                fig_scan.update_layout(title="5-Day Return % — Top Candidates",
-                                       yaxis_title="5d Return %", height=350)
-                st.plotly_chart(fig_scan, use_container_width=True)
+        if not results.empty:
+            st.success(f"Found {len(results)} candidates. Click a row to select it.")
+
+            selection = st.dataframe(
+                results,
+                use_container_width=True,
+                on_select="rerun",
+                selection_mode="single-row",
+                key="scanner_table",
+            )
+
+            # Resolve selected symbol
+            selected_symbol = None
+            rows = selection.selection.get("rows", [])
+            if rows:
+                selected_symbol = results.index[rows[0]]
+                st.info(f"Selected: **{selected_symbol}**")
+                if st.button(f"▶ Send {selected_symbol} to AutoTrader", type="primary"):
+                    st.session_state.at_prefill = selected_symbol
+                    st.session_state.nav_page   = "AutoTrader"
+                    st.rerun()
+
+            fig_scan = go.Figure(go.Bar(
+                x=results.index,
+                y=results["5d Ret%"],
+                marker_color=["green" if v >= 0 else "red" for v in results["5d Ret%"]],
+                text=[f"{v:.2f}%" for v in results["5d Ret%"]],
+                textposition="outside",
+            ))
+            fig_scan.update_layout(title="5-Day Return % — Top Candidates",
+                                   yaxis_title="5d Return %", height=350)
+            st.plotly_chart(fig_scan, use_container_width=True)
+        elif not run_scan:
+            st.info("Run a scan to see candidates.")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # IBKR DASHBOARD
@@ -358,48 +616,68 @@ if broker == "Alpaca (Paper)":
 else:
     from ib_async import Stock, MarketOrder, LimitOrder, util
 
+    ibkr_user    = env_get("IBKR_USERNAME")
+    ibkr_pass    = env_get("IBKR_PASSWORD")
+    trading_mode = env_get("IBKR_MODE", "paper")
+    ibkr_client_id = 1
+
     if not ibkr_user or not ibkr_pass:
-        st.warning("Enter IBKR credentials in the sidebar.")
+        st.warning("IBKR credentials not configured. Go to **Settings** to add them.")
         st.stop()
 
-    gw = get_gateway()
+    gw = get_gateway(ibkr_user, ibkr_pass, trading_mode)
     ib = get_ib()
-
     api_port = 4002 if trading_mode == "paper" else 4001
 
-    # ── Gateway control panel ─────────────────────────────────────────────────
+    # ── Auto-start gateway and connect when credentials are present ───────────
+    if not st.session_state.get("gw_start_attempted"):
+        st.session_state.gw_start_attempted = True
+        if not gw.is_running():
+            with st.spinner("Starting IB Gateway via IBC…"):
+                try:
+                    gw.start()
+                except Exception as e:
+                    st.error(f"Gateway start failed: {e}")
+            with st.spinner("Waiting for API port (up to 90 s)…"):
+                gw.wait_for_api(timeout=90)
+            st.rerun()
+
+    if not ib.isConnected() and gw.api_port_open() and not st.session_state.get("ib_connect_attempted"):
+        st.session_state.ib_connect_attempted = True
+        try:
+            ib.connect("127.0.0.1", api_port, clientId=ibkr_client_id)
+        except Exception:
+            pass
+        st.rerun()
+
     st.title(f"Portfolio Dashboard (IBKR {'Paper' if trading_mode == 'paper' else 'Live'})")
 
     with st.container(border=True):
         st.subheader("Gateway")
-        gw_running  = gw.is_running()
-        api_open    = gw.api_port_open()
+        gw_running   = gw.is_running()
+        api_open     = gw.api_port_open()
         ib_connected = ib.isConnected()
 
         s1, s2, s3 = st.columns(3)
-        s1.metric("Process",    "Running" if gw_running  else "Stopped",
-                  delta_color="normal" if gw_running  else "inverse")
-        s2.metric("API Port",   "Open"    if api_open    else "Closed",
-                  delta_color="normal" if api_open    else "inverse")
-        s3.metric("IB Session", "Connected" if ib_connected else "Disconnected",
+        s1.metric("Process",    "Running"     if gw_running   else "Stopped",
+                  delta_color="normal" if gw_running   else "inverse")
+        s2.metric("API Port",   "Open"        if api_open     else "Closed",
+                  delta_color="normal" if api_open     else "inverse")
+        s3.metric("IB Session", "Connected"   if ib_connected else "Disconnected",
                   delta_color="normal" if ib_connected else "inverse")
 
         c1, c2, c3, c4 = st.columns(4)
-
         if c1.button("Start Gateway", disabled=gw_running):
             with st.spinner("Starting IB Gateway via IBC…"):
                 gw.start()
             with st.spinner("Waiting for API port (up to 90s)…"):
                 ready = gw.wait_for_api(timeout=90)
-            if ready:
-                st.success("Gateway ready.")
-            else:
-                st.error("Timed out. Check logs below.")
+            st.success("Gateway ready.") if ready else st.error("Timed out. Check logs.")
             st.rerun()
 
         if c2.button("Connect", disabled=(not api_open or ib_connected)):
             try:
-                ib.connect("127.0.0.1", api_port, clientId=int(ibkr_client_id))
+                ib.connect("127.0.0.1", api_port, clientId=ibkr_client_id)
                 st.success("Connected.")
             except Exception as e:
                 st.error(f"Connection failed: {e}")
@@ -426,30 +704,27 @@ else:
 
     st.divider()
 
-    # ── Account summary ───────────────────────────────────────────────────────
     summary = ib.accountSummary()
     tags = {v.tag: v.value for v in summary if v.currency in ("USD", "")}
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Net Liquidation",  f"${float(tags.get('NetLiquidation', 0)):,.2f}")
-    col2.metric("Total Cash",       f"${float(tags.get('TotalCashValue', 0)):,.2f}")
-    col3.metric("Buying Power",     f"${float(tags.get('BuyingPower', 0)):,.2f}")
-    col4.metric("Unrealized P&L",   f"${float(tags.get('UnrealizedPnL', 0)):,.2f}")
+    col1.metric("Net Liquidation", f"${float(tags.get('NetLiquidation', 0)):,.2f}")
+    col2.metric("Total Cash",      f"${float(tags.get('TotalCashValue', 0)):,.2f}")
+    col3.metric("Buying Power",    f"${float(tags.get('BuyingPower', 0)):,.2f}")
+    col4.metric("Unrealized P&L",  f"${float(tags.get('UnrealizedPnL', 0)):,.2f}")
 
     st.divider()
 
-    # ── Positions ─────────────────────────────────────────────────────────────
     st.subheader("Open Positions")
     positions = ib.positions()
     if positions:
-        pos_data = [{
+        st.dataframe(pd.DataFrame([{
             "Symbol":   p.contract.symbol,
             "SecType":  p.contract.secType,
             "Exchange": p.contract.exchange,
             "Qty":      p.position,
             "Avg Cost": f"${p.avgCost:.2f}",
-        } for p in positions]
-        st.dataframe(pd.DataFrame(pos_data), use_container_width=True, hide_index=True)
+        } for p in positions]), use_container_width=True, hide_index=True)
 
         fig = go.Figure(go.Bar(
             x=[p.contract.symbol for p in positions],
@@ -464,7 +739,6 @@ else:
 
     st.divider()
 
-    # ── Place Order ───────────────────────────────────────────────────────────
     st.subheader("Place Order")
     with st.form("ibkr_order_form"):
         c1, c2, c3, c4, c5, c6 = st.columns(6)
@@ -490,7 +764,6 @@ else:
 
     st.divider()
 
-    # ── Open Orders ───────────────────────────────────────────────────────────
     st.subheader("Open Orders")
     open_trades = ib.openTrades()
     if open_trades:
