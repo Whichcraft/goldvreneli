@@ -6,6 +6,10 @@ All notable changes to this project will be documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.7.0] — 2026-03-28
+
 ### Added
 - AutoTrader: ATR-based trailing stop (N × ATR(14) dollars, adapts to volatility)
 - AutoTrader: take-profit target (sell configurable fraction when profit hits %)
