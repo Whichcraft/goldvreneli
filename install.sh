@@ -79,20 +79,52 @@ setup_venv() {
 }
 
 # ── IB Gateway ────────────────────────────────────────────────────────────────
+# Version is stored in $GATEWAY_DIR/.gw_version after each install so we can
+# detect whether IBKR is serving a newer build before downloading again.
+
+_gw_latest_version() {
+    # Follow redirect to get the effective URL, then parse the version token.
+    # e.g. …/ibgateway-10.19.2h-standalone-linux-x64.sh → "10.19.2h"
+    local url
+    url="$(curl -s -o /dev/null -w '%{url_effective}' -L "$GATEWAY_URL" 2>/dev/null)"
+    basename "$url" | grep -oP '(?<=ibgateway-)[\w.]+(?=-standalone)' || true
+}
+
 install_ib_gateway() {
-    if [[ -d "$GATEWAY_DIR" ]] && ls "$GATEWAY_DIR"/*/ibgateway &>/dev/null 2>&1; then
-        success "IB Gateway already installed at $GATEWAY_DIR — skipping."
-        return
+    local GW_VERSION_FILE="$GATEWAY_DIR/.gw_version"
+    local installed_ver="" latest_ver=""
+
+    if ls "$GATEWAY_DIR"/*/ibgateway &>/dev/null 2>&1; then
+        # Already installed — check whether a newer build is available
+        [[ -f "$GW_VERSION_FILE" ]] && installed_ver="$(cat "$GW_VERSION_FILE")"
+        info "IB Gateway installed${installed_ver:+ (${installed_ver})} — checking for updates…"
+        latest_ver="$(_gw_latest_version)"
+        if [[ -n "$latest_ver" && "$installed_ver" == "$latest_ver" ]]; then
+            success "IB Gateway is up to date (${installed_ver}) — skipping download."
+            return
+        fi
+        if [[ -n "$latest_ver" ]]; then
+            info "New version available: ${latest_ver}${installed_ver:+ (was ${installed_ver})} — updating…"
+        else
+            # Could not determine latest version (no version token in URL)
+            success "IB Gateway already installed — skipping download (run --update to force)."
+            return
+        fi
+    else
+        info "Downloading IB Gateway stable offline installer…"
+        latest_ver="$(_gw_latest_version)"
     fi
-    info "Downloading IB Gateway stable offline installer…"
+
     TMP_INSTALLER="$(mktemp /tmp/ibgateway-XXXXXX.sh)"
     curl -L --progress-bar "$GATEWAY_URL" -o "$TMP_INSTALLER"
     chmod +x "$TMP_INSTALLER"
     info "Running IB Gateway installer (silent)…"
     "$TMP_INSTALLER" -q -dir "$GATEWAY_DIR" || true
     rm -f "$TMP_INSTALLER"
+
     if ls "$GATEWAY_DIR"/*/ibgateway &>/dev/null 2>&1; then
-        success "IB Gateway installed at $GATEWAY_DIR."
+        [[ -n "$latest_ver" ]] && echo "$latest_ver" > "$GW_VERSION_FILE"
+        success "IB Gateway ${latest_ver:-installed} at $GATEWAY_DIR."
     else
         warn "IB Gateway binary not found after install. Set GATEWAY_PATH in .env manually."
         warn "Download from: https://www.interactivebrokers.com/en/trading/ibgateway-stable.php"
@@ -209,6 +241,9 @@ do_update() {
 
     info "Deploying updated production files…"
     deploy_files "$TMP_REPO" "$INSTALL_DIR"
+
+    info "Checking for IB Gateway updates…"
+    install_ib_gateway
 
     info "Updating Python dependencies…"
     cd "$INSTALL_DIR"
