@@ -22,6 +22,7 @@ Uses Alpaca market data (free, no funded account needed).
 
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Dict, Optional
 
@@ -29,6 +30,18 @@ import pandas as pd
 import pandas_ta as ta
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ScanFilters:
+    """Hard-filter thresholds passed to score_symbol / scan."""
+    min_price:      float = 5.0    # minimum last price ($)
+    min_adv_m:      float = 5.0    # minimum avg daily $ volume (millions)
+    rsi_lo:         float = 35.0   # RSI lower bound
+    rsi_hi:         float = 72.0   # RSI upper bound
+    vol_mult:       float = 1.0    # last volume must be >= vol_mult × avg20
+    sma20_tol_pct:  float = 3.0    # allow price up to this % below SMA20
+    min_ret_5d:     float = -1.0   # minimum 5-day return (%)
 
 # Liquid universe — large/mid-cap US equities, ETFs, and ADRs (~600 symbols)
 UNIVERSE = [
@@ -185,15 +198,19 @@ def fetch_bars(data_client, symbol: str, days: int = 90,
 
 
 def score_symbol(bars: pd.DataFrame,
-                 spy_rets: Optional[Dict[str, float]] = None) -> dict:
+                 spy_rets: Optional[Dict[str, float]] = None,
+                 filters: Optional[ScanFilters] = None) -> dict:
     """
     Compute technical indicators and return a score dict.
     Returns None if the symbol fails any hard filter.
 
     spy_rets: dict with keys "5d", "20d" holding SPY returns for RS calculation.
+    filters:  ScanFilters instance (uses defaults if None).
     """
     if len(bars) < 52:
         return None
+
+    f = filters or ScanFilters()
 
     close     = bars["close"]
     volume    = bars["volume"]
@@ -219,13 +236,13 @@ def score_symbol(bars: pd.DataFrame,
     atr_pct = (atr / last_price) * 100
 
     # ── Hard filters ──────────────────────────────────────────────────────────
-    if last_price < 5:                          return None  # penny stock
-    if adv < 5_000_000:                         return None  # illiquid
-    if last_price < sma50:                      return None  # below 50 SMA
-    if last_price < sma20 * 0.97:               return None  # > 3% below 20 SMA
-    if not (35 <= rsi <= 72):                   return None  # overbought or weak
-    if volume.iloc[-1] < avg_vol20:             return None  # below-avg participation
-    if ret_5d < -1.0:                           return None  # freefall
+    if last_price < f.min_price:                            return None
+    if adv < f.min_adv_m * 1_000_000:                      return None
+    if last_price < sma50:                                  return None
+    if last_price < sma20 * (1 - f.sma20_tol_pct / 100):   return None
+    if not (f.rsi_lo <= rsi <= f.rsi_hi):                   return None
+    if volume.iloc[-1] < avg_vol20 * f.vol_mult:            return None
+    if ret_5d < f.min_ret_5d:                               return None
 
     # ── Relative strength vs SPY ───────────────────────────────────────────
     spy = spy_rets or {}
@@ -268,13 +285,15 @@ def score_symbol(bars: pd.DataFrame,
 
 def scan(data_client, top_n: int = 10, progress_cb=None,
          as_of: Optional[datetime] = None,
-         workers: int = 20) -> pd.DataFrame:
+         workers: int = 20,
+         filters: Optional[ScanFilters] = None) -> pd.DataFrame:
     """
     Scan UNIVERSE, apply filters, return top_n candidates sorted by score.
 
     progress_cb : optional callable(done, total) for progress updates
     as_of       : if set, fetch bars ending on this date (historical mode)
     workers     : parallel fetch threads
+    filters     : ScanFilters instance (uses defaults if None)
     """
     symbols = UNIVERSE
     total   = len(symbols)
@@ -308,7 +327,7 @@ def scan(data_client, top_n: int = 10, progress_cb=None,
     # ── Score ──────────────────────────────────────────────────────────────
     results = []
     for sym, bars in bars_map.items():
-        scored = score_symbol(bars, spy_rets)
+        scored = score_symbol(bars, spy_rets, filters)
         if scored:
             scored["Symbol"] = sym
             results.append(scored)
