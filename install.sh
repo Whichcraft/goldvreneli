@@ -161,6 +161,45 @@ print_summary() {
     echo ""
 }
 
+uninstall() {
+    echo ""
+    echo -e "${RED}╔══════════════════════════════════════════╗${NC}"
+    echo -e "${RED}║   Goldvreneli Trading — Uninstaller      ║${NC}"
+    echo -e "${RED}╚══════════════════════════════════════════╝${NC}"
+    echo ""
+    warn "This will remove:"
+    echo "  - Python venv ($SCRIPT_DIR/venv/)"
+    echo "  - IBC directory ($IBC_DIR/)  [if --with-ibc]"
+    echo "  - IB Gateway ($GATEWAY_DIR/) [if --with-gateway]"
+    echo "  - .env file ($SCRIPT_DIR/.env)"
+    echo ""
+    read -rp "Are you sure? [y/N] " confirm
+    [[ "$confirm" =~ ^[Yy]$ ]] || { info "Aborted."; exit 0; }
+
+    info "Removing Python venv…"
+    rm -rf "$SCRIPT_DIR/venv"
+    success "venv removed."
+
+    info "Removing .env…"
+    rm -f "$SCRIPT_DIR/.env"
+    success ".env removed."
+
+    if $UNINSTALL_IBC; then
+        info "Removing IBC ($IBC_DIR)…"
+        rm -rf "$IBC_DIR"
+        success "IBC removed."
+    fi
+
+    if $UNINSTALL_GATEWAY; then
+        info "Removing IB Gateway ($GATEWAY_DIR)…"
+        rm -rf "$GATEWAY_DIR"
+        success "IB Gateway removed."
+    fi
+
+    echo ""
+    echo -e "${GREEN}Uninstall complete.${NC}"
+}
+
 # ── main ─────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════╗${NC}"
@@ -173,19 +212,37 @@ check_linux
 # Parse flags
 SKIP_GATEWAY=false
 SKIP_IBC=false
+UNINSTALL=false
+UNINSTALL_IBC=false
+UNINSTALL_GATEWAY=false
+
 for arg in "$@"; do
     case $arg in
-        --skip-gateway) SKIP_GATEWAY=true ;;
-        --skip-ibc)     SKIP_IBC=true ;;
+        --skip-gateway)    SKIP_GATEWAY=true ;;
+        --skip-ibc)        SKIP_IBC=true ;;
+        --uninstall)       UNINSTALL=true ;;
+        --with-ibc)        UNINSTALL_IBC=true ;;
+        --with-gateway)    UNINSTALL_GATEWAY=true ;;
         --help|-h)
-            echo "Usage: ./install.sh [--skip-gateway] [--skip-ibc]"
+            echo "Usage: ./install.sh [OPTIONS]"
             echo ""
-            echo "  --skip-gateway   Skip IB Gateway download/install"
-            echo "  --skip-ibc       Skip IBC download/install"
+            echo "Install options:"
+            echo "  --skip-gateway     Skip IB Gateway download/install"
+            echo "  --skip-ibc         Skip IBC download/install"
+            echo ""
+            echo "Uninstall options:"
+            echo "  --uninstall        Remove venv and .env"
+            echo "  --uninstall --with-ibc        Also remove IBC (~/$IBC_DIR)"
+            echo "  --uninstall --with-gateway    Also remove IB Gateway (~/$GATEWAY_DIR)"
             exit 0
             ;;
     esac
 done
+
+if $UNINSTALL; then
+    uninstall
+    exit 0
+fi
 
 install_system_deps
 setup_venv
