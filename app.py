@@ -35,41 +35,35 @@ def env_save(values: dict):
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.title("Goldvreneli")
-    st.caption(f"v{__version__}")
+    st.markdown(f"## Goldvreneli `v{__version__}`")
+    st.divider()
+
+    broker = st.radio("Broker", ["Alpaca (Paper)", "IBKR"],
+                      horizontal=True, label_visibility="collapsed")
 
     st.divider()
-    st.subheader("Broker")
-    broker = st.radio("Broker", ["Alpaca (Paper)", "IBKR"], label_visibility="collapsed")
 
-    st.divider()
-    st.subheader("Navigation")
     # Allow programmatic navigation (e.g. Scanner → AutoTrader handoff)
     if "nav_page" in st.session_state:
         st.session_state["nav_radio"] = st.session_state.pop("nav_page")
+
     if broker == "Alpaca (Paper)":
-        page = st.radio("Navigation", ["Portfolio", "AutoTrader", "Scanner", "Backtest", "Settings"],
-                        label_visibility="collapsed", key="nav_radio")
+        pages = ["Portfolio", "AutoTrader", "Scanner", "Backtest", "Settings"]
+        icons = ["💼", "🤖", "🔍", "🧪", "⚙️"]
     else:
-        page = st.radio("Navigation", ["Portfolio", "Settings"],
-                        label_visibility="collapsed")
+        pages = ["Portfolio", "Settings"]
+        icons = ["💼", "⚙️"]
+
+    page = st.radio(
+        "Page",
+        pages,
+        format_func=lambda p: f"{icons[pages.index(p)]}  {p}",
+        label_visibility="collapsed",
+        key="nav_radio",
+    )
 
     st.divider()
-    with st.expander("About"):
-        st.markdown(f"""
-**Goldvreneli Trading**
-Version `{__version__}`
-
-**Features**
-- Portfolio overview & orders
-- AutoTrader (trailing stop)
-- Position Scanner
-- Settings (save API keys & config)
-
-**Brokers**
-- Alpaca Paper Trading
-- IBKR (via IB Gateway)
-        """)
+    st.caption("Alpaca Paper · IBKR · MIT License")
 
 # ── Alpaca helpers ────────────────────────────────────────────────────────────
 @st.cache_resource
@@ -604,15 +598,16 @@ if broker == "Alpaca (Paper)":
                     st.session_state.nav_page   = "AutoTrader"
                     st.rerun()
 
+            chart_col = "RS vs SPY" if "RS vs SPY" in results.columns else "5d Ret%"
             fig_scan = go.Figure(go.Bar(
                 x=results.index,
-                y=results["5d Ret%"],
-                marker_color=["green" if v >= 0 else "red" for v in results["5d Ret%"]],
-                text=[f"{v:.2f}%" for v in results["5d Ret%"]],
+                y=results[chart_col],
+                marker_color=["green" if v >= 0 else "red" for v in results[chart_col]],
+                text=[f"{v:+.2f}%" for v in results[chart_col]],
                 textposition="outside",
             ))
-            fig_scan.update_layout(title="5-Day Return % — Top Candidates",
-                                   yaxis_title="5d Return %", height=350)
+            fig_scan.update_layout(title=f"{chart_col} — Top Candidates",
+                                   yaxis_title=chart_col, height=350)
             st.plotly_chart(fig_scan, width="stretch")
         elif not run_scan:
             st.info("Run a scan to see candidates.")
