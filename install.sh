@@ -1,108 +1,121 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
 # Goldvreneli — installer
-# Sets up: Python venv, IB Gateway, IBC, Xvfb, .env template
+# Usage: ./install.sh [OPTIONS] [TARGET_DIR]
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_URL="https://github.com/Whichcraft/goldvreneli.git"
 IBC_DIR="$HOME/ibc"
 GATEWAY_DIR="$HOME/Jts/ibgateway"
 IBC_RELEASES="https://github.com/IbcAlpha/IBC/releases/latest"
 GATEWAY_URL="https://download2.interactivebrokers.com/installers/ibgateway/stable-standalone/ibgateway-stable-standalone-linux-x64.sh"
+
+# Production files only — no dev files deployed
+PROD_FILES=(
+    app.py
+    autotrader.py
+    scanner.py
+    gateway_manager.py
+    version.py
+    requirements.txt
+    install.sh
+)
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
 info()    { echo -e "${CYAN}[INFO]${NC}  $*"; }
 success() { echo -e "${GREEN}[OK]${NC}    $*"; }
 warn()    { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 error()   { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
-ask()     { echo -e "${YELLOW}[INPUT]${NC} $*"; }
 
-# ── helpers ───────────────────────────────────────────────────────────────────
-require_cmd() {
-    command -v "$1" &>/dev/null || error "'$1' is required but not found. Install it and re-run."
+require_cmd() { command -v "$1" &>/dev/null || error "'$1' is required but not installed."; }
+check_linux() { [[ "$(uname -s)" == "Linux" ]] || error "This installer supports Linux only."; }
+
+# ── copy production files ──────────────────────────────────────────────────────
+deploy_files() {
+    local src="$1" dst="$2"
+    [[ "$src" == "$dst" ]] && return   # already in place
+    info "Deploying production files to $dst…"
+    mkdir -p "$dst"
+    for f in "${PROD_FILES[@]}"; do
+        if [[ -f "$src/$f" ]]; then
+            cp "$src/$f" "$dst/$f"
+        else
+            warn "Source file not found, skipping: $f"
+        fi
+    done
+    chmod +x "$dst/install.sh"
+    success "Production files deployed (dev files excluded)."
 }
 
-check_linux() {
-    [[ "$(uname -s)" == "Linux" ]] || error "This installer supports Linux only."
-}
-
-# ── steps ─────────────────────────────────────────────────────────────────────
+# ── system deps ───────────────────────────────────────────────────────────────
 install_system_deps() {
-    info "Installing system dependencies (Xvfb, curl, unzip, python3-venv)…"
+    info "Installing system dependencies (Xvfb, curl, unzip, git, python3-venv)…"
     if command -v apt-get &>/dev/null; then
         sudo apt-get update -qq
-        sudo apt-get install -y xvfb curl unzip python3-venv python3-pip
+        sudo apt-get install -y xvfb curl unzip git python3-venv python3-pip
     elif command -v dnf &>/dev/null; then
-        sudo dnf install -y xorg-x11-server-Xvfb curl unzip python3 python3-pip
+        sudo dnf install -y xorg-x11-server-Xvfb curl unzip git python3 python3-pip
     elif command -v pacman &>/dev/null; then
-        sudo pacman -Sy --noconfirm xorg-server-xvfb curl unzip python python-pip
+        sudo pacman -Sy --noconfirm xorg-server-xvfb curl unzip git python python-pip
     else
-        warn "Unknown package manager — install xvfb, curl, unzip, python3-venv manually."
+        warn "Unknown package manager — install xvfb, curl, unzip, git, python3-venv manually."
     fi
     success "System dependencies installed."
 }
 
+# ── venv ──────────────────────────────────────────────────────────────────────
 setup_venv() {
     info "Setting up Python virtual environment…"
-    cd "$SCRIPT_DIR"
+    cd "$INSTALL_DIR"
     if [[ ! -d venv ]]; then
         python3 -m venv venv
     fi
     venv/bin/pip install --quiet --upgrade pip
     venv/bin/pip install --quiet -r requirements.txt
-    success "Python venv ready (venv/)."
+    success "Python venv ready."
 }
 
+# ── IB Gateway ────────────────────────────────────────────────────────────────
 install_ib_gateway() {
     if [[ -d "$GATEWAY_DIR" ]] && ls "$GATEWAY_DIR"/*/ibgateway &>/dev/null 2>&1; then
         success "IB Gateway already installed at $GATEWAY_DIR — skipping."
         return
     fi
-
     info "Downloading IB Gateway stable offline installer…"
     TMP_INSTALLER="$(mktemp /tmp/ibgateway-XXXXXX.sh)"
     curl -L --progress-bar "$GATEWAY_URL" -o "$TMP_INSTALLER"
     chmod +x "$TMP_INSTALLER"
-
     info "Running IB Gateway installer (silent)…"
-    # -q = quiet, -dir = install location
     "$TMP_INSTALLER" -q -dir "$GATEWAY_DIR" || true
     rm -f "$TMP_INSTALLER"
-
     if ls "$GATEWAY_DIR"/*/ibgateway &>/dev/null 2>&1; then
         success "IB Gateway installed at $GATEWAY_DIR."
     else
-        warn "IB Gateway installer finished but binary not found at $GATEWAY_DIR."
-        warn "You may need to install it manually from:"
-        warn "  https://www.interactivebrokers.com/en/trading/ibgateway-stable.php"
-        warn "Then set GATEWAY_PATH in your .env file."
+        warn "IB Gateway binary not found after install. Set GATEWAY_PATH in .env manually."
+        warn "Download from: https://www.interactivebrokers.com/en/trading/ibgateway-stable.php"
     fi
 }
 
+# ── IBC ───────────────────────────────────────────────────────────────────────
 install_ibc() {
     if [[ -f "$IBC_DIR/gatewaystart.sh" ]]; then
         success "IBC already installed at $IBC_DIR — skipping."
         return
     fi
-
-    info "Fetching latest IBC release URL…"
+    info "Fetching latest IBC release…"
     require_cmd curl
     IBC_ZIP_URL="$(curl -sI "$IBC_RELEASES" | grep -i location | tr -d '\r' | awk '{print $2}')"
-    # Build direct download URL for Linux zip
     IBC_VERSION="$(basename "$IBC_ZIP_URL")"
     IBC_DOWNLOAD="https://github.com/IbcAlpha/IBC/releases/download/${IBC_VERSION}/IBCLinux-${IBC_VERSION}.zip"
-
     TMP_ZIP="$(mktemp /tmp/ibc-XXXXXX.zip)"
     info "Downloading IBC ${IBC_VERSION}…"
     curl -L --progress-bar "$IBC_DOWNLOAD" -o "$TMP_ZIP" || {
-        warn "Auto-download failed. Download the Linux zip manually from:"
-        warn "  https://github.com/IbcAlpha/IBC/releases"
-        warn "Then unzip it to $IBC_DIR and chmod +x $IBC_DIR/*.sh $IBC_DIR/scripts/*.sh"
-        rm -f "$TMP_ZIP"
-        return
+        warn "Auto-download failed. Download manually from: https://github.com/IbcAlpha/IBC/releases"
+        warn "Unzip to $IBC_DIR and run: chmod +x $IBC_DIR/*.sh $IBC_DIR/scripts/*.sh"
+        rm -f "$TMP_ZIP"; return
     }
-
     mkdir -p "$IBC_DIR"
     unzip -q "$TMP_ZIP" -d "$IBC_DIR"
     chmod +x "$IBC_DIR"/*.sh "$IBC_DIR"/scripts/*.sh 2>/dev/null || true
@@ -110,21 +123,18 @@ install_ibc() {
     success "IBC installed at $IBC_DIR."
 }
 
+# ── .env ──────────────────────────────────────────────────────────────────────
 create_env_file() {
-    ENV_FILE="$SCRIPT_DIR/.env"
+    ENV_FILE="$INSTALL_DIR/.env"
     if [[ -f "$ENV_FILE" ]]; then
-        warn ".env already exists — skipping (edit it manually if needed)."
+        warn ".env already exists — keeping existing credentials."
         return
     fi
-
     info "Creating .env template…"
-
-    # Detect installed gateway version path
     GW_VERSION_PATH=""
     if ls "$GATEWAY_DIR"/*/ibgateway &>/dev/null 2>&1; then
         GW_VERSION_PATH="$(dirname "$(ls "$GATEWAY_DIR"/*/ibgateway | head -1)")"
     fi
-
     cat > "$ENV_FILE" <<EOF
 # ── Alpaca Paper Trading ──────────────────────────────────────────────────────
 ALPACA_PAPER_API_KEY=
@@ -133,74 +143,114 @@ ALPACA_PAPER_SECRET_KEY=
 # ── IBKR Credentials ─────────────────────────────────────────────────────────
 IBKR_USERNAME=
 IBKR_PASSWORD=
+IBKR_MODE=paper
 
 # ── IBC / Gateway paths ───────────────────────────────────────────────────────
 IBC_PATH=${IBC_DIR}
 GATEWAY_PATH=${GW_VERSION_PATH:-$GATEWAY_DIR}
+
+# ── AutoTrader defaults ───────────────────────────────────────────────────────
+AT_SYMBOL=AAPL
+AT_THRESHOLD=0.5
+AT_POLL=5
+
+# ── Scanner defaults ──────────────────────────────────────────────────────────
+SCAN_TOP_N=10
+SCAN_RSI_LO=40
+SCAN_RSI_HI=65
+SCAN_VOL_MULT=1.5
 EOF
-    success ".env template created — fill in your credentials."
+    success ".env template created."
 }
 
-print_summary() {
+# ── update ────────────────────────────────────────────────────────────────────
+do_update() {
+    info "Checking for updates from $REPO_URL…"
+    require_cmd git
+    require_cmd curl
+
+    TMP_REPO="$(mktemp -d /tmp/goldvreneli-update-XXXXXX)"
+    trap "rm -rf $TMP_REPO" EXIT
+
+    info "Fetching latest release…"
+    git clone --depth 1 --branch main "$REPO_URL" "$TMP_REPO" 2>/dev/null || \
+        git clone --depth 1 "$REPO_URL" "$TMP_REPO"
+
+    NEW_VERSION="$(grep -oP '(?<=__version__ = ")[^"]+' "$TMP_REPO/version.py" 2>/dev/null || echo "unknown")"
+    CUR_VERSION="$(grep -oP '(?<=__version__ = ")[^"]+' "$INSTALL_DIR/version.py" 2>/dev/null || echo "unknown")"
+
+    if [[ "$NEW_VERSION" == "$CUR_VERSION" ]]; then
+        success "Already up to date (v$CUR_VERSION)."
+        # Still update deps in case requirements changed
+    else
+        info "Updating v$CUR_VERSION → v$NEW_VERSION"
+    fi
+
+    info "Deploying updated production files…"
+    deploy_files "$TMP_REPO" "$INSTALL_DIR"
+
+    info "Updating Python dependencies…"
+    cd "$INSTALL_DIR"
+    venv/bin/pip install --quiet --upgrade pip
+    venv/bin/pip install --quiet -r requirements.txt
+
     echo ""
-    echo -e "${GREEN}═══════════════════════════════════════════════════${NC}"
-    echo -e "${GREEN}  Installation complete!${NC}"
-    echo -e "${GREEN}═══════════════════════════════════════════════════${NC}"
-    echo ""
-    echo "  Next steps:"
-    echo "  1. Fill in your credentials:"
-    echo "       nano $SCRIPT_DIR/.env"
-    echo ""
-    echo "  2. Launch the dashboard:"
-    echo "       cd $SCRIPT_DIR"
-    echo "       source venv/bin/activate"
-    echo "       streamlit run app.py"
-    echo ""
-    echo "  IBKR note: use port 4002 (paper) or 4001 (live)."
-    echo "  The app will start IB Gateway automatically via IBC."
+    echo -e "${GREEN}Update complete — now at v${NEW_VERSION}.${NC}"
+    echo "  Restart the app: streamlit run $INSTALL_DIR/app.py"
     echo ""
 }
 
-uninstall() {
+# ── uninstall ─────────────────────────────────────────────────────────────────
+do_uninstall() {
     echo ""
     echo -e "${RED}╔══════════════════════════════════════════╗${NC}"
     echo -e "${RED}║   Goldvreneli Trading — Uninstaller      ║${NC}"
     echo -e "${RED}╚══════════════════════════════════════════╝${NC}"
     echo ""
     warn "This will remove:"
-    echo "  - Python venv ($SCRIPT_DIR/venv/)"
-    echo "  - IBC directory ($IBC_DIR/)  [if --with-ibc]"
-    echo "  - IB Gateway ($GATEWAY_DIR/) [if --with-gateway]"
-    echo "  - .env file ($SCRIPT_DIR/.env)"
+    echo "  - Python venv    ($INSTALL_DIR/venv/)"
+    echo "  - .env file      ($INSTALL_DIR/.env)"
+    $UNINSTALL_IBC     && echo "  - IBC            ($IBC_DIR/)"
+    $UNINSTALL_GATEWAY && echo "  - IB Gateway     ($GATEWAY_DIR/)"
     echo ""
     read -rp "Are you sure? [y/N] " confirm
     [[ "$confirm" =~ ^[Yy]$ ]] || { info "Aborted."; exit 0; }
 
-    info "Removing Python venv…"
-    rm -rf "$SCRIPT_DIR/venv"
-    success "venv removed."
-
-    info "Removing .env…"
-    rm -f "$SCRIPT_DIR/.env"
-    success ".env removed."
-
-    if $UNINSTALL_IBC; then
-        info "Removing IBC ($IBC_DIR)…"
-        rm -rf "$IBC_DIR"
-        success "IBC removed."
-    fi
-
-    if $UNINSTALL_GATEWAY; then
-        info "Removing IB Gateway ($GATEWAY_DIR)…"
-        rm -rf "$GATEWAY_DIR"
-        success "IB Gateway removed."
-    fi
+    rm -rf "$INSTALL_DIR/venv" && success "venv removed."
+    rm -f  "$INSTALL_DIR/.env" && success ".env removed."
+    $UNINSTALL_IBC     && { rm -rf "$IBC_DIR";     success "IBC removed."; }
+    $UNINSTALL_GATEWAY && { rm -rf "$GATEWAY_DIR"; success "IB Gateway removed."; }
 
     echo ""
     echo -e "${GREEN}Uninstall complete.${NC}"
 }
 
-# ── main ─────────────────────────────────────────────────────────────────────
+# ── summary ───────────────────────────────────────────────────────────────────
+print_summary() {
+    echo ""
+    echo -e "${GREEN}═══════════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}  Installation complete!${NC}"
+    echo -e "${GREEN}═══════════════════════════════════════════════════${NC}"
+    echo ""
+    echo "  Installed to: $INSTALL_DIR"
+    echo ""
+    echo "  Next steps:"
+    echo "  1. Add credentials via the Settings page in the app, or edit:"
+    echo "       nano $INSTALL_DIR/.env"
+    echo ""
+    echo "  2. Launch the dashboard:"
+    echo "       cd $INSTALL_DIR"
+    echo "       source venv/bin/activate"
+    echo "       streamlit run app.py"
+    echo ""
+    echo "  3. To update later:"
+    echo "       $INSTALL_DIR/install.sh --update"
+    echo ""
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# main
+# ─────────────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════╗${NC}"
 echo -e "${CYAN}║   Goldvreneli Trading — Installer        ║${NC}"
@@ -209,42 +259,68 @@ echo ""
 
 check_linux
 
-# Parse flags
+# ── parse args ────────────────────────────────────────────────────────────────
 SKIP_GATEWAY=false
 SKIP_IBC=false
-UNINSTALL=false
+DO_UPDATE=false
+DO_UNINSTALL=false
 UNINSTALL_IBC=false
 UNINSTALL_GATEWAY=false
+TARGET_DIR=""
 
 for arg in "$@"; do
     case $arg in
-        --skip-gateway)    SKIP_GATEWAY=true ;;
-        --skip-ibc)        SKIP_IBC=true ;;
-        --uninstall)       UNINSTALL=true ;;
-        --with-ibc)        UNINSTALL_IBC=true ;;
-        --with-gateway)    UNINSTALL_GATEWAY=true ;;
+        --skip-gateway)  SKIP_GATEWAY=true ;;
+        --skip-ibc)      SKIP_IBC=true ;;
+        --update)        DO_UPDATE=true ;;
+        --uninstall)     DO_UNINSTALL=true ;;
+        --with-ibc)      UNINSTALL_IBC=true ;;
+        --with-gateway)  UNINSTALL_GATEWAY=true ;;
         --help|-h)
-            echo "Usage: ./install.sh [OPTIONS]"
+            echo "Usage: ./install.sh [OPTIONS] [TARGET_DIR]"
+            echo ""
+            echo "  TARGET_DIR             Install to this directory (default: script location)"
             echo ""
             echo "Install options:"
-            echo "  --skip-gateway     Skip IB Gateway download/install"
-            echo "  --skip-ibc         Skip IBC download/install"
+            echo "  --skip-gateway         Skip IB Gateway download/install"
+            echo "  --skip-ibc             Skip IBC download/install"
+            echo ""
+            echo "Update option:"
+            echo "  --update               Pull latest release and update pip packages"
             echo ""
             echo "Uninstall options:"
-            echo "  --uninstall        Remove venv and .env"
-            echo "  --uninstall --with-ibc        Also remove IBC (~/$IBC_DIR)"
-            echo "  --uninstall --with-gateway    Also remove IB Gateway (~/$GATEWAY_DIR)"
+            echo "  --uninstall            Remove venv and .env"
+            echo "  --uninstall --with-ibc         Also remove IBC"
+            echo "  --uninstall --with-gateway     Also remove IB Gateway"
             exit 0
             ;;
+        --*) warn "Unknown option: $arg" ;;
+        *)   TARGET_DIR="$arg" ;;
     esac
 done
 
-if $UNINSTALL; then
-    uninstall
+# Resolve install directory
+if [[ -n "$TARGET_DIR" ]]; then
+    INSTALL_DIR="$(realpath -m "$TARGET_DIR")"
+else
+    INSTALL_DIR="$SCRIPT_DIR"
+fi
+
+# ── dispatch ──────────────────────────────────────────────────────────────────
+if $DO_UNINSTALL; then
+    do_uninstall
     exit 0
 fi
 
+if $DO_UPDATE; then
+    [[ -f "$INSTALL_DIR/version.py" ]] || error "No installation found at $INSTALL_DIR. Run install first."
+    do_update
+    exit 0
+fi
+
+# ── fresh install ─────────────────────────────────────────────────────────────
 install_system_deps
+deploy_files "$SCRIPT_DIR" "$INSTALL_DIR"
 setup_venv
 $SKIP_GATEWAY || install_ib_gateway
 $SKIP_IBC     || install_ibc
