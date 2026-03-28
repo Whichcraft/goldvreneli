@@ -302,8 +302,10 @@ done
 # Resolve install directory
 if [[ -n "$TARGET_DIR" ]]; then
     INSTALL_DIR="$(realpath -m "$TARGET_DIR")"
-else
+elif [[ "$SCRIPT_DIR" == "$HOME/goldvreneli" ]]; then
     INSTALL_DIR="$SCRIPT_DIR"
+else
+    INSTALL_DIR="$HOME/goldvreneli"
 fi
 
 # ── dispatch ──────────────────────────────────────────────────────────────────
