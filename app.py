@@ -229,11 +229,16 @@ if broker == "Alpaca (Paper)":
 
     # ── Page: Portfolio ───────────────────────────────────────────────────────
     if page == "Portfolio":
-        col1, col2, col3, col4 = st.columns(4)
+        day_pl     = float(account.equity) - float(account.last_equity)
+        day_pl_pct = (day_pl / float(account.last_equity) * 100) if float(account.last_equity) else 0.0
+        col1, col2, col3, col4, col5 = st.columns(5)
         col1.metric("Portfolio Value", f"${float(account.portfolio_value):,.2f}")
         col2.metric("Cash",            f"${float(account.cash):,.2f}")
         col3.metric("Buying Power",    f"${float(account.buying_power):,.2f}")
         col4.metric("Equity",          f"${float(account.equity):,.2f}")
+        col5.metric("Day P&L",         f"${day_pl:+,.2f}",
+                    delta=f"{day_pl_pct:+.2f}%",
+                    delta_color="normal")
 
         st.divider()
 
@@ -300,12 +305,15 @@ if broker == "Alpaca (Paper)":
             sym        = c1.text_input("Symbol", value="AAPL").upper()
             side       = c2.selectbox("Side", ["BUY", "SELL"])
             order_type = c3.selectbox("Type", ["Market", "Limit"])
-            qty        = c4.number_input("Qty", min_value=0.0, value=1.0, step=1.0)
+            qty        = c4.number_input("Qty", min_value=1.0, value=1.0, step=1.0)
             limit_px   = c5.number_input("Limit Price", min_value=0.0, value=0.0, step=0.01,
                                           disabled=(order_type == "Market"))
             submitted  = st.form_submit_button("Submit Order", type="primary")
 
         if submitted:
+            if not sym:
+                st.error("Symbol must not be empty.")
+                st.stop()
             try:
                 order_side = OrderSide.BUY if side == "BUY" else OrderSide.SELL
                 if order_type == "Market":
@@ -386,36 +394,56 @@ if broker == "Alpaca (Paper)":
         mt = st.session_state.multitrader
 
         # ── New position form ─────────────────────────────────────────────
+        # Handle multi-symbol prefill from Scanner
+        _prefill_list = st.session_state.pop("at_prefill_list", None)
+        _prefill_single = st.session_state.pop("at_prefill", None)
+        if _prefill_list:
+            _default_symbol = _prefill_list[0]
+            _queued = _prefill_list[1:]
+            if _queued:
+                st.session_state["at_queue"] = _queued
+        else:
+            _default_symbol = _prefill_single or env_get("AT_SYMBOL", "")
+
         with st.form("at_config"):
             st.markdown("**New Position**")
             c1, c2, c3 = st.columns(3)
-            at_symbol   = c1.text_input(
-                "Symbol",
-                value=st.session_state.pop("at_prefill", env_get("AT_SYMBOL", "")),
-            ).upper()
+            at_symbol   = c1.text_input("Symbol", value=_default_symbol).upper()
             at_stop_mode = c2.selectbox("Stop Mode", ["PCT", "ATR"],
                                         help="PCT = fixed %; ATR = N × ATR(14) dollars")
             at_stop_val  = c3.number_input(
-                "Trailing Stop % " if True else "ATR Multiplier",
+                "Trailing Stop %",
                 min_value=0.1, max_value=20.0,
                 value=float(env_get("AT_THRESHOLD", "0.5")), step=0.1,
                 help="For PCT: % drop from peak triggers sell. For ATR: multiplier × ATR(14).",
             )
 
-            # Risk-based sizing
-            use_risk_sizing = st.checkbox("Size position by risk %", value=False)
-            if use_risk_sizing:
+            # Qty sizing mode
+            qty_mode = st.radio("Qty mode", ["Shares", "Dollar amount", "Risk %"],
+                                horizontal=True, label_visibility="collapsed")
+            if qty_mode == "Shares":
+                at_qty = st.number_input("Qty (shares)", min_value=1, value=1, step=1)
+            elif qty_mode == "Dollar amount":
+                qc1, qc2 = st.columns(2)
+                at_dollar_amt  = qc1.number_input("$ amount to invest", min_value=1.0,
+                                                   value=1000.0, step=100.0)
+                at_price_est   = qc2.number_input("Est. price per share ($)", min_value=0.01,
+                                                   value=100.0, step=1.0)
+                at_qty = max(1, int(at_dollar_amt / at_price_est))
+                st.caption(f"≈ **{at_qty}** shares @ ${at_price_est:.2f} = ${at_qty * at_price_est:,.2f}")
+            else:
                 rc1, rc2, rc3 = st.columns(3)
-                at_equity    = rc1.number_input("Account equity ($)", min_value=1.0, value=10000.0, step=500.0)
-                at_risk_pct  = rc2.number_input("Risk per trade (%)", min_value=0.1, max_value=10.0, value=1.0, step=0.1)
-                at_entry_est = rc3.number_input("Est. entry price ($)", min_value=0.01, value=100.0, step=1.0)
-                # Compute stop distance from the chosen mode/value
+                at_equity    = rc1.number_input("Account equity ($)", min_value=1.0,
+                                                 value=float(account.equity) if 'account' in dir() else 10000.0,
+                                                 step=500.0)
+                at_risk_pct  = rc2.number_input("Risk per trade (%)", min_value=0.1,
+                                                 max_value=10.0, value=1.0, step=0.1)
+                at_entry_est = rc3.number_input("Est. entry price ($)", min_value=0.01,
+                                                 value=100.0, step=1.0)
                 stop_dist_est = at_entry_est * at_stop_val / 100
                 at_qty = size_from_risk(at_equity, at_risk_pct, at_entry_est, stop_dist_est)
-                st.caption(f"Computed qty: **{at_qty}** shares "
-                           f"(risking ${at_equity * at_risk_pct / 100:,.2f} @ ${stop_dist_est:.2f} stop distance)")
-            else:
-                at_qty = st.number_input("Qty (shares)", min_value=1, value=1, step=1)
+                st.caption(f"**{at_qty}** shares — risking "
+                           f"${at_equity * at_risk_pct / 100:,.2f} @ ${stop_dist_est:.2f} stop dist")
 
             at_poll = st.number_input("Poll interval (s)", min_value=1,
                                       value=int(env_get("AT_POLL", "5")), step=1)
@@ -450,31 +478,44 @@ if broker == "Alpaca (Paper)":
             stop_all_btn = col_stop_all.form_submit_button("⏹ Stop All")
 
         if start_btn:
-            cfg = TraderConfig(
-                stop_mode             = StopMode(at_stop_mode.lower()),
-                stop_value            = at_stop_val,
-                poll_interval         = float(at_poll),
-                entry_mode            = EntryMode(at_entry_mode.lower()),
-                limit_price           = at_limit_price,
-                limit_timeout_s       = float(at_limit_timeout),
-                scale_tranches        = at_scale_n,
-                scale_interval_s      = float(at_scale_ivl),
-                tp_trigger_pct        = at_tp_pct,
-                tp_qty_fraction       = at_tp_frac,
-                breakeven_trigger_pct = at_be_pct,
-                time_stop_minutes     = float(at_time_stop),
-            )
-            try:
-                mt.start(at_symbol, int(at_qty), config=cfg)
-                st.success(f"Started {at_symbol} — {at_stop_mode} stop @ {at_stop_val}")
-            except Exception as e:
-                st.error(str(e))
+            if not at_symbol:
+                st.error("Symbol must not be empty.")
+            else:
+                cfg = TraderConfig(
+                    stop_mode             = StopMode(at_stop_mode.lower()),
+                    stop_value            = at_stop_val,
+                    poll_interval         = float(at_poll),
+                    entry_mode            = EntryMode(at_entry_mode.lower()),
+                    limit_price           = at_limit_price,
+                    limit_timeout_s       = float(at_limit_timeout),
+                    scale_tranches        = at_scale_n,
+                    scale_interval_s      = float(at_scale_ivl),
+                    tp_trigger_pct        = at_tp_pct,
+                    tp_qty_fraction       = at_tp_frac,
+                    breakeven_trigger_pct = at_be_pct,
+                    time_stop_minutes     = float(at_time_stop),
+                )
+                try:
+                    mt.start(at_symbol, int(at_qty), config=cfg)
+                    queue = st.session_state.pop("at_queue", [])
+                    if queue:
+                        st.session_state["at_prefill_list"] = queue
+                        st.success(f"Started {at_symbol}. Next in queue: {queue[0]}")
+                    else:
+                        st.success(f"Started {at_symbol} — {at_stop_mode} stop @ {at_stop_val}")
+                except Exception as e:
+                    st.error(str(e))
             st.rerun()
 
         if stop_all_btn:
             mt.stop_all()
+            st.session_state.pop("at_queue", None)
             st.info("All positions stopped.")
             st.rerun()
+
+        if st.session_state.get("at_queue"):
+            q = st.session_state["at_queue"]
+            st.info(f"Queue: {' → '.join(q)}  (configure & start each in turn)")
 
         # ── Positions table ───────────────────────────────────────────────
         statuses = mt.statuses()
@@ -636,25 +677,24 @@ _Adjust thresholds in **⚙️ Settings → Scanner Filters**_
         results = st.session_state.get("scan_results", pd.DataFrame())
 
         if not results.empty:
-            st.success(f"Found {len(results)} candidates. Click a row to select it.")
+            st.success(f"Found {len(results)} candidates. Select rows then send to AutoTrader.")
 
             selection = st.dataframe(
                 results,
                 width="stretch",
                 on_select="rerun",
-                selection_mode="single-row",
+                selection_mode="multi-row",
                 key="scanner_table",
             )
 
-            # Resolve selected symbol
-            selected_symbol = None
+            # Multi-select → AutoTrader
             rows = selection.selection.get("rows", [])
-            if rows:
-                selected_symbol = results.index[rows[0]]
-                st.info(f"Selected: **{selected_symbol}**")
-                if st.button(f"▶ Send {selected_symbol} to AutoTrader", type="primary"):
-                    st.session_state.at_prefill = selected_symbol
-                    st.session_state.nav_page   = "AutoTrader"
+            selected_symbols = [results.index[r] for r in rows]
+            if selected_symbols:
+                st.info(f"Selected: {', '.join(f'**{s}**' for s in selected_symbols)}")
+                if st.button(f"▶ Send {len(selected_symbols)} symbol(s) to AutoTrader", type="primary"):
+                    st.session_state.at_prefill_list = selected_symbols
+                    st.session_state.nav_page        = "AutoTrader"
                     st.rerun()
 
             chart_col = "RS vs SPY" if "RS vs SPY" in results.columns else "5d Ret%"

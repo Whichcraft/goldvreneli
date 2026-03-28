@@ -34,6 +34,7 @@ from typing import Callable, Dict, List, Optional
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 
 # ── Enums ─────────────────────────────────────────────────────────────────────
@@ -236,6 +237,10 @@ class AutoTrader:
         poll_interval: Optional[float] = None,
     ):
         """Buy `qty` shares of `symbol` and begin monitoring."""
+        if qty < 1:
+            raise ValueError(f"qty must be at least 1, got {qty}")
+        if not symbol or not symbol.strip():
+            raise ValueError("symbol must not be empty")
         if self.status.state == TraderState.WATCHING:
             raise RuntimeError("AutoTrader already running.")
 
@@ -459,7 +464,10 @@ class AutoTrader:
 
                 # ── Take-profit ───────────────────────────────────────────
                 if cfg.tp_trigger_pct > 0 and not s.tp_executed and price >= s.tp_price:
-                    sell_qty = max(1, int(s.qty_remaining * cfg.tp_qty_fraction))
+                    sell_qty = min(
+                        s.qty_remaining,
+                        max(1, int(s.qty_remaining * cfg.tp_qty_fraction)),
+                    )
                     self._place_sell(s.symbol, sell_qty)
                     s.qty_remaining -= sell_qty
                     s.tp_executed    = True
@@ -566,39 +574,39 @@ class MultiTrader:
         Start a new position. Raises RuntimeError if symbol already WATCHING
         or daily loss limit is breached.
         """
-        symbol = symbol.upper()
+        symbol = symbol.upper().strip()
+        if not symbol:
+            raise ValueError("symbol must not be empty")
+        if qty < 1:
+            raise ValueError(f"qty must be at least 1, got {qty}")
 
+        # Atomic check-and-reserve under lock to prevent races
         with self._loss_lock:
-            watching = {s for s, t in self._traders.items()
-                        if t.status.state == TraderState.WATCHING}
-            if symbol in watching:
+            if symbol in self._traders and self._traders[symbol].status.state == TraderState.WATCHING:
                 raise RuntimeError(f"{symbol} is already being watched.")
-
             if self._daily_loss_limit > 0 and self._realized_loss >= self._daily_loss_limit:
                 raise RuntimeError(
                     f"Daily loss limit ${self._daily_loss_limit:,.2f} reached "
                     f"(realized losses ${self._realized_loss:,.2f}) — no new trades."
                 )
 
-        at = AutoTrader(
-            get_price  = self._get_price,
-            place_buy  = self._place_buy,
-            place_sell = self._place_sell,
-            get_bars   = self._get_bars,
-        )
+            at = AutoTrader(
+                get_price  = self._get_price,
+                place_buy  = self._place_buy,
+                place_sell = self._place_sell,
+                get_bars   = self._get_bars,
+            )
 
-        # Wire realized loss callback
-        def on_close(pnl: float):
-            if pnl < 0:
-                with self._loss_lock:
-                    self._realized_loss += abs(pnl)
+            def on_close(pnl: float):
+                if pnl < 0:
+                    with self._loss_lock:
+                        self._realized_loss += abs(pnl)
 
-        at._on_close = on_close
+            at._on_close = on_close
+            self._traders[symbol] = at   # reserve slot before starting thread
+
         at.start(symbol, qty, config=config,
                  threshold_pct=threshold_pct, poll_interval=poll_interval)
-
-        with self._loss_lock:
-            self._traders[symbol] = at
 
         logger.info(f"MultiTrader: started {symbol} qty={qty}")
         return at
