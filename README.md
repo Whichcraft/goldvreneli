@@ -2,7 +2,7 @@
 
 ![Version](https://img.shields.io/badge/version-0.14.0-blue)
 
-A Streamlit-based trading dashboard supporting **Alpaca Paper Trading** and **Interactive Brokers (IBKR)** via IB Gateway, with automated trading and position scanning.
+A Streamlit-based trading dashboard supporting **Alpaca Paper Trading** and **Interactive Brokers (IBKR)** via IB Gateway, with automated trailing-stop trading, technical scanning, and offline backtesting.
 
 ---
 
@@ -10,10 +10,11 @@ A Streamlit-based trading dashboard supporting **Alpaca Paper Trading** and **In
 
 - **Alpaca paper trading** — portfolio, positions, candlestick charts, order placement
 - **IBKR live/paper trading** — IB Gateway managed directly from the app (no Docker)
-- **AutoTrader** — trailing-stop position manager: holds as long as price rises, sells when it drops below a configurable threshold
-- **Position Scanner** — scans ~60 liquid US stocks/ETFs with technical filters and proposes the top 10 candidates
-- IB Gateway auto-start via IBC + Xvfb
-- Market and limit orders, cancel all
+- **AutoTrader** — trailing-stop position manager: holds as long as price rises, sells when it drops below a configurable threshold; supports PCT and ATR stops, limit/scale entry, take-profit, breakeven, time stop, and multi-symbol queuing
+- **Position Scanner** — scans ~600 liquid US stocks, ETFs, and ADRs with technical filters (RSI, SMA, volume, relative strength vs SPY) and proposes top candidates; historical mode supported
+- **Backtest** — replay real Alpaca 1-minute bars or synthetic random-walk data to test AutoTrader settings offline
+- IB Gateway auto-start via IBC + Xvfb (headless, no manual login on startup)
+- Risk-% and dollar-amount position sizing
 - Semantic versioning + changelog
 
 ---
@@ -51,11 +52,17 @@ The installer sets up:
 ./goldvreneli-install.sh --help
 ```
 
+### Updating
+
+```bash
+./goldvreneli-install.sh --update
+```
+
 ---
 
 ## Configuration
 
-Fill in `.env` after install:
+Fill in `.env` after install, or use the **⚙️ Settings** page in the app:
 
 ```env
 # Alpaca Paper Trading
@@ -69,6 +76,23 @@ IBKR_PASSWORD=
 # Paths (auto-detected by installer)
 IBC_PATH=~/goldvreneli/ibc
 GATEWAY_PATH=~/goldvreneli/Jts/ibgateway
+
+# AutoTrader defaults
+AT_SYMBOL=
+AT_THRESHOLD=0.5
+AT_POLL=5
+AT_DAILY_LOSS_LIMIT=0
+
+# Scanner defaults
+SCAN_TOP_N=10
+SCAN_MIN_PRICE=5.0
+SCAN_MIN_ADV_M=5.0
+SCAN_RSI_LO=35
+SCAN_RSI_HI=72
+SCAN_VOL_MULT=1.0
+SCAN_SMA20_TOL=3.0
+SCAN_MIN_RET5D=-1.0
+SCAN_WATCHLIST=
 ```
 
 Get Alpaca paper API keys at [alpaca.markets](https://alpaca.markets) → Paper Trading → API Keys.
@@ -86,73 +110,127 @@ Open [http://localhost:8501](http://localhost:8501) in your browser.
 
 ---
 
-## Tabs (Alpaca Mode)
+## Pages (Alpaca Mode)
 
-### Portfolio
-- Account overview: portfolio value, cash, buying power, equity
+### 💼 Portfolio
+- Account overview: portfolio value, cash, buying power, equity, day P&L with delta %
 - Open positions table + unrealized P&L bar chart
-- Candlestick price chart (1D / 1W / 1M / 3M)
+- Candlestick price chart (1D / 1W / 1M / 3M) — symbol remembered across page switches
 - Place market or limit orders
 - Open orders table with cancel all
 
-### AutoTrader
-Trailing-stop automated position manager.
+### 🤖 AutoTrader
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| Symbol | AAPL | Stock to trade |
-| Qty | 1 | Number of shares |
-| Trailing Stop % | 0.5% | Sell when price drops this % below peak |
-| Poll interval | 5s | Price check frequency |
+Trailing-stop automated position manager. Buys on start, tracks peak price, sells when drawdown exceeds threshold.
 
-- Buys on start, tracks peak price in real time
-- Sells automatically when drawdown ≥ threshold
-- Live status: entry, peak, current price, drawdown progress bar, P&L
-- Full activity log (BUY / PEAK / SELL / STOP / ERROR)
+**Stop modes**
 
-### Scanner
-Scans ~60 liquid US stocks and ETFs. Filters applied:
+| Mode | Description |
+|------|-------------|
+| PCT | Sell when price drops N% below peak |
+| ATR | Sell when price drops N × ATR(14) below peak |
 
-| Filter | Condition |
-|--------|-----------|
-| Trend | Price > SMA20 and SMA50 |
-| RSI(14) | 40–65 |
-| Volume | > 1.5× 20-day average |
-| Liquidity | Price > $5, ADV > $5M |
-| Momentum | 5-day return > 0% |
+**Entry modes**
 
-Returns top N candidates ranked by composite score with a 5-day return bar chart.
+| Mode | Description |
+|------|-------------|
+| Market | Buy immediately at market price |
+| Limit | Place limit order; cancel and re-enter at market after timeout |
+| Scale | Buy in N tranches spaced by interval (dollar-cost average into position) |
+
+**Exit targets**
+
+| Setting | Description |
+|---------|-------------|
+| Take-profit trigger % | Sell a fraction of the position when up this % |
+| Fraction to sell at TP | e.g. 0.5 = sell half, trail the rest |
+| Breakeven trigger % | Once up this %, move stop floor to entry (lock in breakeven) |
+| Time stop (minutes) | Exit after this many minutes regardless of price |
+
+**Qty sizing**
+
+| Mode | Description |
+|------|-------------|
+| Shares | Fixed number of shares |
+| Dollar amount | Converts to shares at current price |
+| Risk % | Sizes so a full stop-out = N% of equity |
+
+**Daily loss limit** — set in Settings; blocks new entries once realized losses reach the threshold.
+
+**Multi-symbol queue** — select multiple Scanner candidates and send them to AutoTrader. Symbols load one at a time; start each to advance the queue.
+
+### 🔍 Scanner
+
+Scans ~600 liquid US stocks, ETFs, and ADRs using daily Alpaca bars and pandas-ta indicators.
+
+**Hard filters** (all must pass)
+
+| Filter | Default | Meaning |
+|--------|---------|---------|
+| Min price | $5 | Excludes penny stocks |
+| Min ADV | $5M/day | Minimum average daily dollar volume |
+| RSI(14) | 35–72 | Avoids overbought and deeply oversold |
+| Volume | ≥ 1× 20-day avg | Requires above-average volume |
+| SMA20 tolerance | 3% | Price may be up to 3% below SMA20 |
+| Min 5d return | −1% | Filters out stocks in sharp downtrend |
+| Above SMA50 | required | Intermediate-term uptrend required |
+
+**Scoring** — composite rank across:
+- Relative strength vs SPY (weight 3×, dominant factor)
+- 1-day, 5-day, 10-day, 20-day returns
+- SMA20 slope
+- ATR% penalty (discounts high-volatility names)
+
+**Historical mode** — tick "Historical date" to scan as of a past date using data up to that close.
+
+**Symbol list** — expand to choose specific symbols or scan the full ~600-symbol universe. Pre-populated from your watchlist in Settings.
+
+**Stale warning** — if results are more than 30 minutes old, a warning appears.
+
+**Sending to AutoTrader** — select rows in the results table (multi-row), click *Send N symbol(s) to AutoTrader*. Symbols are queued.
+
+### 🧪 Backtest
+
+Test AutoTrader logic offline — no real orders placed.
+
+**Replay feed** — fetches real Alpaca 1-minute bars for a symbol and date, plays them back at configurable speed. Supports full day, duration (start time + N hours), or custom time range (ET).
+
+**Synthetic feed** — geometric random walk. Configurable start price, volatility, drift, and random seed for reproducibility.
+
+After the run:
+- Live status shows state, entry/current/peak/stop prices, P&L, drawdown bar, replay progress
+- Post-run summary shows final P&L (green/red) and fill counts
+- Session history table shows all past runs; expand any session to see individual fills
+
+### ⚙️ Settings
+
+All settings saved to `.env` and persist across restarts. See configuration section above for all keys.
 
 ---
 
 ## IBKR Setup
 
-1. Select **IBKR** in the sidebar and enter credentials
+1. Select **IBKR** in the sidebar and enter credentials in **⚙️ Settings**
 2. Click **Start Gateway** — launches headlessly via IBC + Xvfb (30–90s startup)
-3. Click **Connect** once the API port is open
-4. Use port `4002` for paper, `4001` for live
+3. Click **Connect** once the API port shows as *Open*
 
-### Ports
+**Ports**
 
-| Mode  | App        | Port |
-|-------|------------|------|
-| Paper | IB Gateway | 4002 |
-| Paper | TWS        | 7497 |
-| Live  | IB Gateway | 4001 |
-| Live  | TWS        | 7496 |
+| Mode  | Port |
+|-------|------|
+| Paper | 4002 |
+| Live  | 4001 |
 
-### Two-Factor Authentication
-
-IBC supports IBKR Mobile soft token (push notification — approve once at startup). Hardware tokens require one manual login per day at `AUTO_RESTART_TIME` (default: 11:59 PM).
+**Authentication** — IBC supports IBKR Mobile push notifications (approve once at startup). Hardware tokens require one manual login per day.
 
 ---
 
 ## Versioning
 
 ```bash
-./bump.sh patch   # 0.3.0 → 0.3.1
-./bump.sh minor   # 0.3.0 → 0.4.0
-./bump.sh major   # 0.3.0 → 1.0.0
+./bump.sh patch   # 0.14.0 → 0.14.1
+./bump.sh minor   # 0.14.0 → 0.15.0
+./bump.sh major   # 0.14.0 → 1.0.0
 git push && git push --tags
 ```
 
@@ -162,16 +240,17 @@ git push && git push --tags
 
 ```
 goldvreneli/
-├── goldvreneli.py              # Streamlit dashboard (Portfolio, AutoTrader, Scanner)
-├── autotrader.py       # Trailing-stop AutoTrader logic
-├── scanner.py          # Technical position scanner
-├── gateway_manager.py  # IB Gateway lifecycle (IBC + Xvfb)
-├── version.py          # Single version source of truth
-├── bump.sh             # Version bump script
-├── goldvreneli-install.sh          # One-command installer
-├── requirements.txt    # Python dependencies
-├── .env                # Credentials (gitignored)
-└── venv/               # Python virtual environment (gitignored)
+├── goldvreneli.py          # Streamlit dashboard (all pages)
+├── autotrader.py           # AutoTrader + MultiTrader logic
+├── scanner.py              # Technical position scanner
+├── replay.py               # ReplayPriceFeed, SyntheticPriceFeed, MockBroker
+├── gateway_manager.py      # IB Gateway lifecycle (IBC + Xvfb)
+├── version.py              # Single version source of truth
+├── bump.sh                 # Version bump script
+├── goldvreneli-install.sh  # One-command installer + updater
+├── requirements.txt        # Python dependencies
+├── .env                    # Credentials (gitignored)
+└── venv/                   # Python virtual environment (gitignored)
 ```
 
 ---
