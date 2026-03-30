@@ -2,15 +2,16 @@
 
 ![Version](https://img.shields.io/badge/version-0.15.0-blue)
 
-A Streamlit-based trading dashboard supporting **Alpaca Paper Trading** and **Interactive Brokers (IBKR)** via IB Gateway, with automated trailing-stop trading, technical scanning, and offline backtesting.
+A Streamlit-based trading dashboard supporting **Alpaca Paper and Live Trading** and **Interactive Brokers (IBKR)** via IB Gateway, with automated trailing-stop trading, technical scanning, portfolio automation, and offline backtesting.
 
 ---
 
 ## Features
 
-- **Alpaca paper trading** — portfolio, positions, candlestick charts, order placement
+- **Alpaca paper and live trading** — toggle between modes in the sidebar; live mode requires confirmation and shows a red warning banner
 - **IBKR live/paper trading** — IB Gateway managed directly from the app (no Docker)
 - **AutoTrader** — trailing-stop position manager: holds as long as price rises, sells when it drops below a configurable threshold; supports PCT and ATR stops, limit/scale entry, take-profit, breakeven, time stop, and multi-symbol queuing
+- **Portfolio Mode** — fully automated: maintains up to N concurrent positions from scanner picks, each sized at a fixed % of equity; on exit, rescans and opens the next best candidate
 - **Position Scanner** — scans ~600 liquid US stocks, ETFs, and ADRs with technical filters (RSI, SMA, volume, relative strength vs SPY) and proposes top candidates; historical mode supported
 - **Backtest** — replay real Alpaca 1-minute bars or synthetic random-walk data to test AutoTrader settings offline
 - IB Gateway auto-start via IBC + Xvfb (headless, no manual login on startup)
@@ -100,6 +101,7 @@ SCAN_WATCHLIST=
 ```
 
 Get Alpaca paper API keys at [alpaca.markets](https://alpaca.markets) → Paper Trading → API Keys.
+Get live API keys at alpaca.markets → Live Trading → API Keys (funded account required).
 
 ---
 
@@ -111,6 +113,19 @@ streamlit run goldvreneli.py
 ```
 
 Open [http://localhost:8501](http://localhost:8501) in your browser.
+
+---
+
+## Alpaca Paper vs Live
+
+The sidebar shows an **Alpaca** broker selector with a **Live Trading** toggle.
+
+| Mode | Keys used | Orders |
+|------|-----------|--------|
+| Paper (default) | `ALPACA_PAPER_*` | Simulated — no real money |
+| Live | `ALPACA_LIVE_*` | **Real orders on your funded account** |
+
+Switching to Live requires a confirmation step ("You're going to trade with your real money now!") and displays a persistent red warning banner. If live API keys are not yet configured, an inline credential form appears before proceeding.
 
 ---
 
@@ -162,6 +177,31 @@ Trailing-stop automated position manager. Buys on start, tracks peak price, sell
 **Daily loss limit** — set in Settings; blocks new entries once realized losses reach the threshold.
 
 **Multi-symbol queue** — select multiple Scanner candidates and send them to AutoTrader. Symbols load one at a time; start each to advance the queue.
+
+### 📈 Portfolio Mode
+
+Fully automated multi-position manager. Runs the scanner, opens positions in the top picks, and replaces each position when it closes.
+
+**How it works**
+
+1. On start, scans for candidates and opens up to *target slots* positions simultaneously
+2. Each position is sized at *slot %* of current account equity (default: 10 slots × 10%)
+3. Every position is managed by AutoTrader with the configured trailing stop
+4. When a position closes (stop triggered), the next scanner pick is opened automatically
+5. If no qualifying candidates exist, the slot stays empty until the next rescan
+
+**Configuration**
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Target slots | 10 | Maximum simultaneous positions |
+| % of equity per slot | 10% | Position size as fraction of equity |
+| Stop mode | PCT | PCT or ATR trailing stop |
+| Trailing stop value | 0.5% | % drop from peak (PCT) or ATR multiplier |
+| Poll interval | 5s | How often each position checks the price |
+| Daily loss limit | off | Halts new entries after this cumulative loss |
+
+**Candidate list** — scanned fresh at startup and refreshed automatically if more than 30 minutes old. Already-active symbols are skipped when picking the next candidate.
 
 ### 🔍 Scanner
 
@@ -232,9 +272,9 @@ All settings saved to `.env` and persist across restarts. See configuration sect
 ## Versioning
 
 ```bash
-./bump.sh patch   # 0.14.0 → 0.14.1
-./bump.sh minor   # 0.14.0 → 0.15.0
-./bump.sh major   # 0.14.0 → 1.0.0
+./bump.sh patch   # 0.15.0 → 0.15.1
+./bump.sh minor   # 0.15.0 → 0.16.0
+./bump.sh major   # 0.15.0 → 1.0.0
 git push && git push --tags
 ```
 
@@ -247,6 +287,7 @@ goldvreneli/
 ├── goldvreneli.py          # Streamlit UI (all pages)
 ├── core.py                 # Framework-agnostic core: credentials, client cache, session factories
 ├── autotrader.py           # AutoTrader + MultiTrader logic
+├── portfolio.py            # PortfolioManager: automated multi-position manager
 ├── scanner.py              # Technical position scanner
 ├── replay.py               # ReplayPriceFeed, SyntheticPriceFeed, MockBroker
 ├── gateway_manager.py      # IB Gateway lifecycle (IBC + Xvfb)
