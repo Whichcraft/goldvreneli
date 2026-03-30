@@ -8,6 +8,13 @@ All notable changes to this project will be documented here.
 
 ---
 
+## [0.18.1] — 2026-03-30
+
+### Fixed
+- Scanner → AutoTrader symbol prefill lost on page rerun: `at_prefill_list` was popped on the first render and every subsequent rerender fell back to `AT_SYMBOL` (AAPL). Symbol is now stored in `at_current_symbol` which survives reruns; advancing through the queue on position start no longer requires a round-trip through `at_prefill_list`.
+
+---
+
 ## [0.18.0] — 2026-03-30
 
 ### Added
