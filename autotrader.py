@@ -30,7 +30,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import pandas as pd
 
@@ -567,6 +567,8 @@ class AutoTrader:
                 logger.error(f"AutoTrader [{s.symbol}] error: {e}")
                 s.state = TraderState.ERROR
                 self._log("ERROR", 0.0, str(e))
+                if self._on_close:
+                    self._on_close(s.pnl)
                 self._stop_event.set()
                 break
 
@@ -599,11 +601,16 @@ class MultiTrader:
 
     def __init__(
         self,
-        get_price:        Callable[[str], float],
-        place_buy:        Callable[[str, int], None],
-        place_sell:       Callable[[str, int], None],
-        get_bars:         Optional[Callable] = None,
-        daily_loss_limit: float = 0.0,
+        get_price:            Callable[[str], float],
+        place_buy:            Callable[[str, int], None],
+        place_sell:           Callable[[str, int], None],
+        get_bars:             Optional[Callable] = None,
+        daily_loss_limit:     float = 0.0,
+        initial_realized_loss: float = 0.0,
+        loss_persist_fn:      Optional[Callable[[float], None]] = None,
+        fill_open_fn:         Optional[Callable[[str], Any]] = None,
+        fill_record_fn:       Optional[Callable[[Any, str, str, int, float], None]] = None,
+        fill_close_fn:        Optional[Callable[[Any, float], None]] = None,
     ):
         self._get_price        = get_price
         self._place_buy        = place_buy
@@ -611,7 +618,11 @@ class MultiTrader:
         self._get_bars         = get_bars
         self._daily_loss_limit = daily_loss_limit
         self._traders:         Dict[str, AutoTrader] = {}
-        self._realized_loss:   float                 = 0.0
+        self._realized_loss:   float                 = initial_realized_loss
+        self._loss_persist_fn: Optional[Callable[[float], None]] = loss_persist_fn
+        self._fill_open_fn    = fill_open_fn
+        self._fill_record_fn  = fill_record_fn
+        self._fill_close_fn   = fill_close_fn
         self._loss_lock        = threading.Lock()
 
     # ── Public API ─────────────────────────────────────────────────────────────
@@ -650,10 +661,29 @@ class MultiTrader:
                     f"(realized losses ${self._realized_loss:,.2f}) — no new trades."
                 )
 
+            # Open a fill-log session and wrap buy/sell to record fills
+            fill_handle = self._fill_open_fn(symbol) if self._fill_open_fn else None
+            _last_price: list = [0.0]
+
+            def _tracked_get_price(sym: str) -> float:
+                price = self._get_price(sym)
+                _last_price[0] = price
+                return price
+
+            def _logged_buy(sym: str, qty: int) -> None:
+                self._place_buy(sym, qty)
+                if self._fill_record_fn and fill_handle is not None:
+                    self._fill_record_fn(fill_handle, "BUY", sym, qty, _last_price[0])
+
+            def _logged_sell(sym: str, qty: int) -> None:
+                self._place_sell(sym, qty)
+                if self._fill_record_fn and fill_handle is not None:
+                    self._fill_record_fn(fill_handle, "SELL", sym, qty, _last_price[0])
+
             at = AutoTrader(
-                get_price  = self._get_price,
-                place_buy  = self._place_buy,
-                place_sell = self._place_sell,
+                get_price  = _tracked_get_price,
+                place_buy  = _logged_buy,
+                place_sell = _logged_sell,
                 get_bars   = self._get_bars,
             )
 
@@ -661,6 +691,10 @@ class MultiTrader:
                 if pnl < 0:
                     with self._loss_lock:
                         self._realized_loss += abs(pnl)
+                        if self._loss_persist_fn:
+                            self._loss_persist_fn(self._realized_loss)
+                if fill_handle is not None and self._fill_close_fn:
+                    self._fill_close_fn(fill_handle, pnl)
                 if on_close:
                     on_close(pnl)
 
@@ -697,10 +731,23 @@ class MultiTrader:
             ):
                 raise RuntimeError(f"{symbol} is already active.")
 
+            fill_handle = self._fill_open_fn(symbol) if self._fill_open_fn else None
+            _last_price: list = [0.0]
+
+            def _tracked_get_price(sym: str) -> float:
+                price = self._get_price(sym)
+                _last_price[0] = price
+                return price
+
+            def _logged_sell(sym: str, qty: int) -> None:
+                self._place_sell(sym, qty)
+                if self._fill_record_fn and fill_handle is not None:
+                    self._fill_record_fn(fill_handle, "SELL", sym, qty, _last_price[0])
+
             at = AutoTrader(
-                get_price  = self._get_price,
-                place_buy  = self._place_buy,
-                place_sell = self._place_sell,
+                get_price  = _tracked_get_price,
+                place_buy  = self._place_buy,   # attach never buys
+                place_sell = _logged_sell,
                 get_bars   = self._get_bars,
             )
 
@@ -708,6 +755,10 @@ class MultiTrader:
                 if pnl < 0:
                     with self._loss_lock:
                         self._realized_loss += abs(pnl)
+                        if self._loss_persist_fn:
+                            self._loss_persist_fn(self._realized_loss)
+                if fill_handle is not None and self._fill_close_fn:
+                    self._fill_close_fn(fill_handle, pnl)
                 if on_close:
                     on_close(pnl)
 

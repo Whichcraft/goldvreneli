@@ -8,6 +8,70 @@ All notable changes to this project will be documented here.
 
 ---
 
+## [0.32.0] — 2026-03-30
+
+### Changed
+- **AutoTrader**: positions table and activity log wrapped in `@st.fragment` — auto-refreshes every 5 s independently of the form above, so typing symbols or adjusting sliders is no longer interrupted (#6)
+- **Scanner**: stale results (> 30 min) now trigger an automatic background rescan instead of just showing a warning (#7)
+- **Quick Invest**: clicking *Invest Now* now shows a per-symbol fill summary (symbol, qty, approx fill price, invested amount, status) before navigating — errors are visible and a *Go to AutoTrader* button controls navigation (#8)
+- **Unit tests**: 45 tests added covering `size_from_risk`, `_calc_atr`, `SyntheticPriceFeed`, `MockBroker`, and `AutoTrader` full lifecycle (#10)
+
+---
+
+## [0.31.0] — 2026-03-30
+
+### Changed
+- **Modularized UI**: `goldvreneli.py` split from 2084 lines into page modules — each page is now its own module under `pages/` with a `render(...)` function; `goldvreneli.py` is reduced to ~450 lines (sidebar + broker setup + dispatch)
+- **`ibkr_data.py`**: `_IBKRDataClient` inner class extracted to a standalone `IBKRDataClient` class used by both Scanner and Backtest pages
+- Page modules: `pages/settings_page.py`, `pages/help_page.py`, `pages/portfolio_page.py`, `pages/autotrader_page.py`, `pages/portfolio_mode_page.py`, `pages/scanner_page.py`, `pages/backtest_page.py`
+- No logic changes — purely structural reorganisation
+
+---
+
+## [0.30.0] — 2026-03-30
+
+### Added
+- **Persistent live trade log**: every live position opened via `MultiTrader` is now recorded to `live_fills.json` using the same session format as `backtest_fills.json`; fills survive Streamlit restarts and broker switches
+- **Trade History table on AutoTrader page**: shows all past live sessions (symbol, entry time, close time, buy/sell count, P&L) with per-session fill detail in expandable rows — mirrors the Backtest session history UI
+- **`LiveFillLogger` in `core.py`**: thread-safe fill logger with `open_session` / `record` / `close_session` methods; wired into `MultiTrader` via three new optional callbacks (`fill_open_fn`, `fill_record_fn`, `fill_close_fn`)
+
+---
+
+## [0.29.0] — 2026-03-30
+
+### Fixed
+- **AutoTrader thread crash**: unhandled exception in `_run()` now calls `_on_close` before exiting so `PortfolioManager` refills the slot and loss accounting is updated; previously positions silently froze in ERROR state
+- **Daily loss limit reset on broker switch**: `MultiTrader` now accepts `initial_realized_loss` and `loss_persist_fn`; `core.get_multi_trader()` loads today's cumulative loss from `daily_loss.json` on construction and persists it on every realized loss — switching brokers or reloading the page no longer resets the counter
+- **IBKR gateway crash recovery**: IBKR broker block now detects a dead gateway process (`gw_start_attempted` set but `gw.is_running()` False) and clears both attempt flags so auto-start retries on the next rerun; also detects dropped IB sessions (port still open, IB disconnected) and clears `ib_connect_attempted` to allow one reconnect
+
+---
+
+## [0.28.0] — 2026-03-30
+
+### Changed
+- README: added IBKR workflow description (step-by-step setup flow, mobile auth note, scanner speed caveat)
+- README: moved Backtest into a new dedicated **Testing** section alongside Scanner Test mode; removed both from their previous locations
+
+---
+
+## [0.27.0] — 2026-03-30
+
+### Changed
+- Replace deprecated `use_container_width` with `width='stretch'` in Portfolio page dataframes and charts (Streamlit deprecation)
+
+---
+
+## [0.26.0] — 2026-03-30
+
+### Added
+- **IBKR: full page parity** — Scanner, AutoTrader, Portfolio Mode, and Backtest are now available when IBKR is selected as the broker
+- **IBKR broker callables** — `ibkr_get_price` (live tick), `ibkr_buy/sell` (market orders), `ibkr_get_bars` (30-day daily history via `reqHistoricalData`)
+- **`_IBKRDataClient` shim** — minimal implementation of the Alpaca data client interface so Scanner and Backtest work with IBKR historical data (note: IBKR scans one symbol at a time — expect slower scanning than Alpaca)
+- **Broker-aware position monitoring** — Portfolio Mode "Monitor existing positions" panel now fetches open positions from IBKR when that broker is active
+- **Broker switch reset** — switching between Alpaca and IBKR clears the MultiTrader and PortfolioManager session state so callables are always correct for the active broker
+
+---
+
 ## [0.25.1] — 2026-03-30
 
 ### Fixed

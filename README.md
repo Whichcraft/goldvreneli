@@ -1,6 +1,6 @@
 # Goldvreneli Trading Dashboard
 
-![Version](https://img.shields.io/badge/version-0.25.1-blue)
+![Version](https://img.shields.io/badge/version-0.32.0-blue)
 
 A Streamlit-based trading dashboard supporting **Alpaca Paper and Live Trading** and **Interactive Brokers (IBKR)** via IB Gateway, with automated trailing-stop trading, technical scanning, portfolio automation, and offline backtesting.
 
@@ -9,7 +9,7 @@ A Streamlit-based trading dashboard supporting **Alpaca Paper and Live Trading**
 ## Features
 
 - **Alpaca paper and live trading** — toggle between modes in the sidebar; live mode requires confirmation and shows a red warning banner
-- **IBKR live/paper trading** — IB Gateway managed directly from the app (no Docker)
+- **IBKR live/paper trading** — IB Gateway managed directly from the app (no Docker); full page parity with Alpaca: Scanner, AutoTrader, Portfolio Mode, and Backtest all work with IBKR
 - **AutoTrader** — trailing-stop position manager: holds as long as price rises, sells when it drops below a configurable threshold; supports PCT and ATR stops, limit/scale entry, take-profit, breakeven, time stop, and multi-symbol queuing
 - **Portfolio Mode** — fully automated: maintains up to N concurrent positions from scanner picks, each sized at a fixed % of equity; on exit, rescans and opens the next best candidate
 - **Position Scanner** — scans liquid stocks, ETFs, and ADRs across four selectable universes (US ~593, INTL small ~62, INTL full ~125, All ~718) with technical filters (RSI, SMA, volume, relative strength vs SPY); **🧪 Test mode** in the sidebar replays as of any past date
@@ -130,10 +130,6 @@ The sidebar shows an **Alpaca** broker selector with a **Live Trading** toggle. 
 | Live | `ALPACA_LIVE_*` | **Real orders on your funded account** |
 
 Switching to Live requires a confirmation step and displays a persistent red warning banner. If live API keys are not yet configured, an inline credential form appears before proceeding.
-
-### 🧪 Test mode
-
-Enable **Test mode (historic data)** in the sidebar to run the Scanner as of any past date. An "As-of date" picker appears; all scanner fetches use closing data up to that date. Portfolio and trading pages are unaffected.
 
 ---
 
@@ -267,6 +263,18 @@ Scans liquid stocks, ETFs, and ADRs using daily Alpaca bars and pandas-ta indica
 
 **Configure & Queue** — select rows, click *Configure & Queue* to send them to AutoTrader where you can review and adjust settings for each before starting.
 
+### ⚙️ Settings
+
+All settings saved to `.env` and persist across restarts. See configuration section above for all keys.
+
+---
+
+## Testing
+
+### 🧪 Test mode (Scanner historic data)
+
+Enable **Test mode (historic data)** in the sidebar to run the Scanner as of any past date. An "As-of date" picker appears; all scanner fetches use closing data up to that date. Portfolio and trading pages are unaffected — this is a read-only, risk-free way to evaluate what the scanner would have surfaced on a given day.
+
 ### 🧪 Backtest
 
 Test AutoTrader logic offline — no real orders placed.
@@ -280,17 +288,18 @@ After the run:
 - Post-run summary shows final P&L (green/red) and fill counts
 - Session history table shows all past runs; expand any session to see individual fills
 
-### ⚙️ Settings
-
-All settings saved to `.env` and persist across restarts. See configuration section above for all keys.
-
 ---
 
 ## IBKR Setup
 
-1. Select **IBKR** in the sidebar and enter credentials in **⚙️ Settings**
-2. Click **Start Gateway** — launches headlessly via IBC + Xvfb (30–90s startup)
-3. Click **Connect** once the API port shows as *Open*
+**Typical workflow**
+
+1. Enter your IBKR credentials in **⚙️ Settings** (username + password)
+2. Select **IBKR** in the sidebar broker selector
+3. Click **Start Gateway** on the Settings page — launches IB Gateway headlessly via IBC + Xvfb (allow 30–90 s)
+4. Once the API port shows *Open*, click **Connect**
+5. Approve the login on **IBKR Mobile** (push notification) — required once per session
+6. Use any page normally — Scanner, AutoTrader, Portfolio Mode, and Backtest all work with IBKR data and orders
 
 **Ports**
 
@@ -300,6 +309,8 @@ All settings saved to `.env` and persist across restarts. See configuration sect
 | Live  | 4001 |
 
 **Authentication** — IBC supports IBKR Mobile push notifications (approve once at startup). Hardware tokens require one manual login per day.
+
+**Note** — Scanner scans one symbol at a time with IBKR historical data; expect slower scan times than Alpaca.
 
 ---
 
@@ -318,19 +329,28 @@ git push && git push --tags
 
 ```
 goldvreneli/
-├── goldvreneli.py          # Streamlit UI (all pages)
-├── core.py                 # Framework-agnostic core: credentials, client cache, session factories
-├── autotrader.py           # AutoTrader + MultiTrader logic
-├── portfolio.py            # PortfolioManager: automated multi-position manager
-├── scanner.py              # Technical position scanner
-├── replay.py               # ReplayPriceFeed, SyntheticPriceFeed, MockBroker
-├── gateway_manager.py      # IB Gateway lifecycle (IBC + Xvfb)
-├── version.py              # Single version source of truth
-├── bump.sh                 # Version bump script
-├── goldvreneli-install.sh  # One-command installer + updater
-├── requirements.txt        # Python dependencies
-├── .env                    # Credentials (gitignored)
-└── venv/                   # Python virtual environment (gitignored)
+├── goldvreneli.py               # Streamlit entry point: sidebar, broker setup, page dispatch
+├── pages/
+│   ├── settings_page.py         # ⚙️ Settings page
+│   ├── help_page.py             # ❓ Help page
+│   ├── portfolio_page.py        # 💼 Portfolio page (Alpaca + IBKR)
+│   ├── autotrader_page.py       # 🤖 AutoTrader page
+│   ├── portfolio_mode_page.py   # 📈 Portfolio Mode page
+│   ├── scanner_page.py          # 🔍 Scanner page
+│   └── backtest_page.py         # 🧪 Backtest page
+├── core.py                      # Framework-agnostic core: credentials, client cache, session factories, LiveFillLogger
+├── autotrader.py                # AutoTrader + MultiTrader logic
+├── portfolio.py                 # PortfolioManager: automated multi-position manager
+├── scanner.py                   # Technical position scanner
+├── replay.py                    # ReplayPriceFeed, SyntheticPriceFeed, MockBroker
+├── ibkr_data.py                 # IBKRDataClient: Alpaca data client interface shim for IBKR
+├── gateway_manager.py           # IB Gateway lifecycle (IBC + Xvfb)
+├── version.py                   # Single version source of truth
+├── bump.sh                      # Version bump script
+├── goldvreneli-install.sh       # One-command installer + updater
+├── requirements.txt             # Python dependencies
+├── .env                         # Credentials (gitignored)
+└── venv/                        # Python virtual environment (gitignored)
 ```
 
 ---

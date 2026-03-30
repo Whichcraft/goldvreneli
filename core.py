@@ -36,15 +36,126 @@ Typical Qt / CLI usage
     mt = get_multi_trader(session, get_price_fn, buy_fn, sell_fn, bars_fn)
 """
 
+import json
 import os
+import threading
+import uuid
+from datetime import date, datetime
+from pathlib import Path
 from typing import Any, Callable, Dict, MutableMapping, Optional, Tuple
 
 from dotenv import dotenv_values, load_dotenv, set_key
 
 load_dotenv()
 
-INSTALL_DIR: str = os.path.dirname(os.path.abspath(__file__))
-ENV_FILE: str    = os.path.join(INSTALL_DIR, ".env")
+INSTALL_DIR: str       = os.path.dirname(os.path.abspath(__file__))
+ENV_FILE: str          = os.path.join(INSTALL_DIR, ".env")
+_DAILY_LOSS_FILE: str  = os.path.join(INSTALL_DIR, "daily_loss.json")
+LIVE_FILLS_FILE: str   = os.path.join(INSTALL_DIR, "live_fills.json")
+
+
+# ── Daily loss persistence ─────────────────────────────────────────────────────
+
+def load_daily_loss() -> float:
+    """Return today's cumulative realized loss from disk; 0.0 if none or stale."""
+    try:
+        with open(_DAILY_LOSS_FILE) as f:
+            data = json.load(f)
+        if data.get("date") == str(date.today()):
+            return float(data.get("realized_loss", 0.0))
+    except (FileNotFoundError, json.JSONDecodeError, KeyError, ValueError):
+        pass
+    return 0.0
+
+
+def save_daily_loss(realized_loss: float) -> None:
+    """Persist today's cumulative realized loss to disk."""
+    try:
+        with open(_DAILY_LOSS_FILE, "w") as f:
+            json.dump({"date": str(date.today()), "realized_loss": realized_loss}, f)
+    except OSError:
+        pass
+
+
+# ── Live fill logger ──────────────────────────────────────────────────────────
+
+class LiveFillLogger:
+    """
+    Persists live trade fills to a JSON file using the same session format as
+    MockBroker so the same ``load_sessions()`` helper can render both.
+
+    Each ``open_session()`` call returns a session_id handle.  Pass
+    ``record`` and ``close_session`` as callbacks into MultiTrader.
+    """
+
+    def __init__(self, output_file: str) -> None:
+        self._path = Path(output_file)
+        self._lock = threading.Lock()
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+
+    def open_session(self, symbol: str) -> str:
+        """Register a new position session; return its session_id."""
+        sid = str(uuid.uuid4())[:12]
+        session: Dict[str, Any] = {
+            "id":         sid,
+            "started_at": datetime.now().isoformat(timespec="seconds"),
+            "closed_at":  None,
+            "meta":       {"symbol": symbol, "feed": "live"},
+            "fills":      [],
+            "pnl":        None,
+        }
+        with self._lock:
+            data = self._load()
+            data["sessions"].append(session)
+            self._save(data)
+        return sid
+
+    def record(self, session_id: str, action: str, symbol: str,
+               qty: int, price: float) -> None:
+        """Append a fill record to the given session."""
+        fill = {
+            "time":   datetime.now().isoformat(timespec="seconds"),
+            "action": action,
+            "symbol": symbol,
+            "qty":    qty,
+            "price":  round(price, 4),
+            "value":  round(price * qty, 2),
+        }
+        with self._lock:
+            data = self._load()
+            for s in data["sessions"]:
+                if s["id"] == session_id:
+                    s["fills"].append(fill)
+                    break
+            self._save(data)
+
+    def close_session(self, session_id: str, pnl: float) -> None:
+        """Mark a session closed with its final P&L."""
+        with self._lock:
+            data = self._load()
+            for s in data["sessions"]:
+                if s["id"] == session_id:
+                    s["closed_at"] = datetime.now().isoformat(timespec="seconds")
+                    s["pnl"] = round(pnl, 2)
+                    break
+            self._save(data)
+
+    # ── Internal ──────────────────────────────────────────────────────────────
+
+    def _load(self) -> Dict[str, Any]:
+        if self._path.exists():
+            try:
+                data = json.loads(self._path.read_text())
+                if isinstance(data, dict) and "sessions" in data:
+                    return data
+            except (json.JSONDecodeError, OSError):
+                pass
+        return {"sessions": []}
+
+    def _save(self, data: Dict[str, Any]) -> None:
+        tmp = self._path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, indent=2))
+        tmp.replace(self._path)
 
 
 # ── Credentials ───────────────────────────────────────────────────────────────
@@ -155,13 +266,22 @@ def get_multi_trader(
     Broker callables are supplied by the UI/frontend layer so different
     frontends can wire in different brokers without changing core logic.
     """
+    if "live_fill_logger" not in session:
+        session["live_fill_logger"] = LiveFillLogger(LIVE_FILLS_FILE)
+    fill_logger: LiveFillLogger = session["live_fill_logger"]
+
     if "multitrader" not in session:
         from autotrader import MultiTrader
         session["multitrader"] = MultiTrader(
-            get_price        = get_price_fn,
-            place_buy        = place_buy_fn,
-            place_sell       = place_sell_fn,
-            get_bars         = get_bars_fn,
-            daily_loss_limit = float(env_get("AT_DAILY_LOSS_LIMIT", "0")),
+            get_price             = get_price_fn,
+            place_buy             = place_buy_fn,
+            place_sell            = place_sell_fn,
+            get_bars              = get_bars_fn,
+            daily_loss_limit      = float(env_get("AT_DAILY_LOSS_LIMIT", "0")),
+            initial_realized_loss = load_daily_loss(),
+            loss_persist_fn       = save_daily_loss,
+            fill_open_fn          = fill_logger.open_session,
+            fill_record_fn        = fill_logger.record,
+            fill_close_fn         = fill_logger.close_session,
         )
     return session["multitrader"]

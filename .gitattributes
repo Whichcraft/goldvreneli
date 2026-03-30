@@ -1,0 +1,4 @@
+# Files excluded from git archive (release tarballs / GitHub zip downloads)
+CLAUDE.md       export-ignore
+bump.sh         export-ignore
+.claude/        export-ignore
