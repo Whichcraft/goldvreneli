@@ -569,10 +569,14 @@ class MultiTrader:
         config:        Optional[TraderConfig] = None,
         threshold_pct: Optional[float]        = None,
         poll_interval: Optional[float]        = None,
+        on_close:      Optional[Callable[[float], None]] = None,
     ) -> AutoTrader:
         """
         Start a new position. Raises RuntimeError if symbol already WATCHING
         or daily loss limit is breached.
+
+        on_close : optional callback(pnl) called when the position closes,
+                   in addition to the internal loss-limit accounting.
         """
         symbol = symbol.upper().strip()
         if not symbol:
@@ -582,8 +586,10 @@ class MultiTrader:
 
         # Atomic check-and-reserve under lock to prevent races
         with self._loss_lock:
-            if symbol in self._traders and self._traders[symbol].status.state == TraderState.WATCHING:
-                raise RuntimeError(f"{symbol} is already being watched.")
+            if symbol in self._traders and self._traders[symbol].status.state in (
+                TraderState.ENTERING, TraderState.WATCHING
+            ):
+                raise RuntimeError(f"{symbol} is already active.")
             if self._daily_loss_limit > 0 and self._realized_loss >= self._daily_loss_limit:
                 raise RuntimeError(
                     f"Daily loss limit ${self._daily_loss_limit:,.2f} reached "
@@ -597,12 +603,14 @@ class MultiTrader:
                 get_bars   = self._get_bars,
             )
 
-            def on_close(pnl: float):
+            def _on_close(pnl: float):
                 if pnl < 0:
                     with self._loss_lock:
                         self._realized_loss += abs(pnl)
+                if on_close:
+                    on_close(pnl)
 
-            at._on_close = on_close
+            at._on_close = _on_close
             self._traders[symbol] = at   # reserve slot before starting thread
 
         at.start(symbol, qty, config=config,

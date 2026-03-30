@@ -18,6 +18,7 @@ PROD_FILES=(
     goldvreneli.py
     core.py
     autotrader.py
+    portfolio.py
     scanner.py
     replay.py
     gateway_manager.py

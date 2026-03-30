@@ -10,6 +10,7 @@ from core import (
     get_alpaca_clients, clear_alpaca_cache,
     get_gateway, get_ib,
     get_multi_trader,
+    get_portfolio_manager,
 )
 from autotrader import (
     AutoTrader, MultiTrader, TraderConfig, TraderState,
@@ -36,8 +37,8 @@ with st.sidebar:
         st.session_state["nav_radio"] = st.session_state.pop("nav_page")
 
     if broker == "Alpaca (Paper)":
-        pages = ["Portfolio", "AutoTrader", "Scanner", "Backtest", "Settings", "Help"]
-        icons = ["💼", "🤖", "🔍", "🧪", "⚙️", "❓"]
+        pages = ["Portfolio", "AutoTrader", "Portfolio Mode", "Scanner", "Backtest", "Settings", "Help"]
+        icons = ["💼", "🤖", "📈", "🔍", "🧪", "⚙️", "❓"]
     else:
         pages = ["Portfolio", "Settings", "Help"]
         icons = ["💼", "⚙️", "❓"]
@@ -736,6 +737,176 @@ if broker == "Alpaca (Paper)":
 
         # Auto-refresh while any position is watching
         if any(s.state == TraderState.WATCHING for s in mt.statuses().values()):
+            time.sleep(5)
+            st.rerun()
+
+    # ── Page: Portfolio Mode ─────────────────────────────────────────────────
+    elif page == "Portfolio Mode":
+        st.subheader("Portfolio Mode")
+        st.caption(
+            "Automatically maintains up to N positions from scanner picks. "
+            "Each slot is sized at a fixed % of equity. On exit, the next best candidate is opened."
+        )
+
+        def alpaca_get_price_pm(symbol: str) -> float:
+            from alpaca.data.requests import StockLatestQuoteRequest
+            quote = data_client.get_stock_latest_quote(StockLatestQuoteRequest(symbol_or_symbols=symbol))
+            return float(quote[symbol].ask_price or quote[symbol].bid_price)
+
+        def alpaca_buy_pm(symbol: str, qty: int):
+            trading_client.submit_order(MarketOrderRequest(
+                symbol=symbol, qty=qty,
+                side=OrderSide.BUY, time_in_force=TimeInForce.DAY
+            ))
+
+        def alpaca_sell_pm(symbol: str, qty: int):
+            trading_client.submit_order(MarketOrderRequest(
+                symbol=symbol, qty=qty,
+                side=OrderSide.SELL, time_in_force=TimeInForce.DAY
+            ))
+
+        def alpaca_get_bars_pm(symbol: str) -> pd.DataFrame:
+            bars = data_client.get_stock_bars(StockBarsRequest(
+                symbol_or_symbols=symbol,
+                timeframe=TimeFrame.Day,
+                start=datetime.now() - timedelta(days=30),
+            )).df
+            bars = bars.reset_index(level=0, drop=True)
+            return bars[["open", "high", "low", "close", "volume"]]
+
+        def alpaca_get_equity() -> float:
+            return float(trading_client.get_account().equity)
+
+        pm_exists = "portfolio_manager" in st.session_state
+        pm_running = pm_exists and st.session_state["portfolio_manager"].running
+
+        # ── Configuration ─────────────────────────────────────────────────
+        with st.expander("Configuration", expanded=not pm_running):
+            pmc1, pmc2 = st.columns(2)
+            pm_slots    = pmc1.number_input("Target slots", min_value=1, max_value=20,
+                                             value=int(env_get("PM_TARGET_SLOTS", "10")),
+                                             disabled=pm_running)
+            pm_slot_pct = pmc2.number_input("% of equity per slot", min_value=1.0,
+                                             max_value=50.0, step=1.0,
+                                             value=float(env_get("PM_SLOT_PCT", "10.0")),
+                                             disabled=pm_running)
+
+            pms1, pms2 = st.columns(2)
+            pm_stop_mode = pms1.selectbox("Stop mode", ["PCT", "ATR"],
+                                          disabled=pm_running)
+            pm_stop_val  = pms2.number_input(
+                "Trailing stop value",
+                min_value=0.1, max_value=20.0, step=0.1,
+                value=float(env_get("AT_THRESHOLD", "0.5")),
+                help="PCT: % drop from peak; ATR: N × ATR(14)",
+                disabled=pm_running,
+            )
+            pm_poll      = st.number_input("Poll interval (s)", min_value=1, max_value=60,
+                                            value=int(env_get("AT_POLL", "5")),
+                                            disabled=pm_running)
+            pm_loss_limit = st.number_input(
+                "Daily loss limit ($, 0 = off)", min_value=0.0, step=100.0,
+                value=float(env_get("AT_DAILY_LOSS_LIMIT", "0")),
+                disabled=pm_running,
+            )
+
+        # ── Start / Stop ──────────────────────────────────────────────────
+        btn_col1, btn_col2, _ = st.columns([1, 1, 4])
+        if btn_col1.button("▶  Start", type="primary", disabled=pm_running):
+            # Clear any stale instance so we recreate with fresh settings
+            st.session_state.pop("portfolio_manager", None)
+            cfg = TraderConfig(
+                stop_mode     = StopMode.PCT if pm_stop_mode == "PCT" else StopMode.ATR,
+                stop_value    = pm_stop_val,
+                poll_interval = float(pm_poll),
+            )
+            pm = get_portfolio_manager(
+                st.session_state,
+                data_client,
+                alpaca_get_price_pm,
+                alpaca_buy_pm,
+                alpaca_sell_pm,
+                alpaca_get_bars_pm,
+                alpaca_get_equity,
+                target_slots      = int(pm_slots),
+                slot_pct          = float(pm_slot_pct),
+                trader_config     = cfg,
+                daily_loss_limit  = float(pm_loss_limit),
+            )
+            pm.start()
+            st.rerun()
+
+        if btn_col2.button("⏹  Stop", disabled=not pm_running):
+            st.session_state["portfolio_manager"].stop()
+            st.rerun()
+
+        # ── Status ────────────────────────────────────────────────────────
+        if pm_exists:
+            pm = st.session_state["portfolio_manager"]
+            st.divider()
+
+            # Summary metrics
+            sm1, sm2, sm3, sm4 = st.columns(4)
+            sm1.metric("Active slots",    f"{pm.active_count()} / {pm._target_slots}")
+            sm2.metric("Open slots",      str(pm.open_slot_count()))
+            sm3.metric("Session P&L",     f"${pm.session_pnl():+,.2f}")
+            sm4.metric("Realized losses", f"${pm.realized_losses():,.2f}")
+
+            scan_age = pm.scan_age_s()
+            if scan_age is not None:
+                age_str = f"{int(scan_age // 60)}m {int(scan_age % 60)}s ago"
+                if scan_age > 1800:
+                    st.warning(f"Candidate list may be stale — last scan {age_str}")
+                else:
+                    st.caption(f"Last scan: {age_str}")
+
+            # Active positions table
+            statuses = pm.statuses()
+            active_rows = []
+            for sym, s in statuses.items():
+                if s.state in (TraderState.ENTERING, TraderState.WATCHING):
+                    active_rows.append({
+                        "Symbol":   sym,
+                        "State":    s.state.value.upper(),
+                        "Qty":      s.qty_remaining,
+                        "Entry":    f"${s.entry_price:.2f}",
+                        "Current":  f"${s.current_price:.2f}",
+                        "Peak":     f"${s.peak_price:.2f}",
+                        "Stop":     f"${s.stop_floor:.2f}",
+                        "P&L":      f"${s.pnl:+,.2f}",
+                        "Draw%":    f"{s.drawdown_pct:.2f}%",
+                    })
+            closed_rows = [
+                {
+                    "Symbol":  sym,
+                    "State":   s.state.value.upper(),
+                    "P&L":     f"${s.pnl:+,.2f}",
+                }
+                for sym, s in statuses.items()
+                if s.state not in (TraderState.ENTERING, TraderState.WATCHING)
+            ]
+
+            if active_rows:
+                st.subheader(f"Active positions ({len(active_rows)})")
+                st.dataframe(pd.DataFrame(active_rows), width="stretch", hide_index=True)
+            else:
+                st.info("No active positions yet.")
+
+            if closed_rows:
+                with st.expander(f"Closed this session ({len(closed_rows)})"):
+                    st.dataframe(pd.DataFrame(closed_rows), width="stretch", hide_index=True)
+
+            # Activity log
+            log = pm.log_entries()
+            if log:
+                st.subheader("Activity Log")
+                st.dataframe(
+                    pd.DataFrame(reversed(log)),
+                    width="stretch", hide_index=True,
+                )
+
+        # Auto-refresh while running
+        if pm_running:
             time.sleep(5)
             st.rerun()
 

@@ -112,6 +112,36 @@ def get_ib(session: MutableMapping) -> Any:
 
 # ── MultiTrader ────────────────────────────────────────────────────────────────
 
+def get_portfolio_manager(
+    session:       MutableMapping,
+    data_client:   Any,
+    get_price_fn:  Callable,
+    place_buy_fn:  Callable,
+    place_sell_fn: Callable,
+    get_bars_fn:   Optional[Callable],
+    get_equity_fn: Callable,
+    **kwargs,
+) -> Any:
+    """
+    Return the session's PortfolioManager, creating it on first call.
+
+    kwargs are forwarded to PortfolioManager (target_slots, slot_pct,
+    trader_config, scan_filters, daily_loss_limit).
+    """
+    if "portfolio_manager" not in session:
+        from portfolio import PortfolioManager
+        session["portfolio_manager"] = PortfolioManager(
+            data_client   = data_client,
+            get_price_fn  = get_price_fn,
+            place_buy_fn  = place_buy_fn,
+            place_sell_fn = place_sell_fn,
+            get_bars_fn   = get_bars_fn,
+            get_equity_fn = get_equity_fn,
+            **kwargs,
+        )
+    return session["portfolio_manager"]
+
+
 def get_multi_trader(
     session:       MutableMapping,
     get_price_fn:  Callable[[str], float],
