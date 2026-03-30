@@ -59,7 +59,7 @@ def render():
         # ── Scanner defaults ──────────────────────────────────────────────────
         st.subheader("Scanner Filters")
         c1, c2, c3, c4 = st.columns(4)
-        f_scan_n          = c1.number_input("Top N results",       min_value=1,   max_value=50,
+        f_scan_n          = c1.number_input("Max scan results",     min_value=1,   max_value=50,
                                              value=int(env_get("SCAN_TOP_N",        "10")))
         f_scan_rsi_lo     = c2.number_input("RSI min",             min_value=1,   max_value=99,
                                              value=int(env_get("SCAN_RSI_LO",       "35")))
@@ -152,3 +152,51 @@ def render():
         st.session_state["_settings_key_msgs"] = key_msgs
 
         st.rerun()
+
+    # ── Test Connection (outside form — uses currently saved .env values) ──────
+    st.divider()
+    st.subheader("Test Connection")
+    st.caption("Tests the API keys currently saved in .env (save first if you just changed them).")
+    tc1, tc2 = st.columns(2)
+    if tc1.button("Test Alpaca Paper", use_container_width=True):
+        key    = env_get("ALPACA_PAPER_API_KEY")
+        secret = env_get("ALPACA_PAPER_SECRET_KEY")
+        if not key or not secret:
+            st.error("No Alpaca Paper keys saved yet.")
+        else:
+            try:
+                from alpaca.trading.client import TradingClient
+                acct = TradingClient(api_key=key, secret_key=secret, paper=True).get_account()
+                st.success(f"✅ Paper keys OK — account {str(acct.id)[:8]}… ({acct.status})")
+            except Exception as _e:
+                st.error(f"❌ Paper keys invalid: {_e}")
+    if tc2.button("Test Alpaca Live", use_container_width=True):
+        key    = env_get("ALPACA_LIVE_API_KEY")
+        secret = env_get("ALPACA_LIVE_SECRET_KEY")
+        if not key or not secret:
+            st.error("No Alpaca Live keys saved yet.")
+        else:
+            try:
+                from alpaca.trading.client import TradingClient
+                acct = TradingClient(api_key=key, secret_key=secret, paper=False).get_account()
+                st.success(f"✅ Live keys OK — account {str(acct.id)[:8]}… ({acct.status})")
+            except Exception as _e:
+                st.error(f"❌ Live keys invalid: {_e}")
+
+    st.divider()
+    st.subheader("Test IBKR Gateway")
+    st.caption("Checks the gateway connection that is currently active in this session.")
+    if st.button("Test IBKR Gateway", use_container_width=True):
+        _ib = st.session_state.get("ib")
+        if _ib is None:
+            st.error("No IBKR session active — switch broker to IBKR and start the gateway first.")
+        elif not _ib.isConnected():
+            st.error("❌ Gateway not connected.")
+        else:
+            try:
+                _summary = _ib.accountSummary()
+                _tags    = {v.tag: v.value for v in _summary if v.currency in ("USD", "")}
+                _nlv     = float(_tags.get("NetLiquidation", 0))
+                st.success(f"✅ IBKR connected — Net Liquidation: ${_nlv:,.2f}")
+            except Exception as _e:
+                st.error(f"❌ IBKR query failed: {_e}")

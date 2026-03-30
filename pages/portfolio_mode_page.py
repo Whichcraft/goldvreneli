@@ -98,14 +98,24 @@ def render(mt, data_client, get_price_fn, buy_fn, sell_fn, get_bars_fn, get_equi
             pm.start()
         st.rerun()
 
-    btn_col1, btn_col2, btn_col3, _ = st.columns([1.4, 1, 1, 2])
+    btn_col1, btn_col2, btn_col3, btn_col4 = st.columns([1.4, 1, 1, 1])
     if btn_col1.button("▶ Start Sequential", type="primary", disabled=pm_running,
                        help="Open positions one at a time; replace each on close."):
         _launch_pm("sequential")
     if btn_col2.button("▶ Start All", type="primary", disabled=pm_running,
                        help="Open all slots simultaneously."):
         _launch_pm("all")
-    if btn_col3.button("⏹  Stop", disabled=not pm_running):
+    _pm_obj    = st.session_state.get("portfolio_manager")
+    _pm_paused = pm_exists and _pm_obj is not None and _pm_obj.paused
+    if btn_col3.button("⏸ Pause" if not _pm_paused else "▶ Resume",
+                       disabled=not pm_running,
+                       help="Pause: keep monitoring existing positions but open no new ones. Resume to fill empty slots again."):
+        if _pm_paused:
+            _pm_obj.resume()
+        else:
+            _pm_obj.pause()
+        st.rerun()
+    if btn_col4.button("⏹  Stop", disabled=not pm_running):
         st.session_state["portfolio_manager"].stop()
         st.rerun()
 
@@ -121,13 +131,22 @@ def render(mt, data_client, get_price_fn, buy_fn, sell_fn, get_bars_fn, get_equi
         sm3.metric("Session P&L",     f"${pm.session_pnl():+,.2f}")
         sm4.metric("Realized losses", f"${pm.realized_losses():,.2f}")
 
+        if pm.paused:
+            st.info("⏸ **Paused** — existing positions are monitored; no new slots will open until resumed.")
+
         scan_age = pm.scan_age_s()
         if scan_age is not None:
             age_str = f"{int(scan_age // 60)}m {int(scan_age % 60)}s ago"
+            sc1, sc2 = st.columns([4, 1])
             if scan_age > 1800:
-                st.warning(f"Candidate list may be stale — last scan {age_str}")
+                sc1.warning(f"Candidate list may be stale — last scan {age_str}")
             else:
-                st.caption(f"Last scan: {age_str}")
+                sc1.caption(f"Last scan: {age_str}")
+            if sc2.button("🔄 Rescan", key="pm_rescan",
+                          help="Force a fresh scan now instead of waiting for the 30-minute auto-refresh"):
+                import threading
+                threading.Thread(target=pm._rescan, daemon=True).start()
+                st.rerun()
 
         # Active positions table
         statuses = pm.statuses()

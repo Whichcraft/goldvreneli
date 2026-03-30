@@ -89,6 +89,7 @@ class PortfolioManager:
         )
 
         self._running:        bool                  = False
+        self._paused:         bool                  = False
         self._candidates:     List[str]             = []
         self._candidates_ts:  Optional[datetime]    = None
         self._claimed:        set                   = set()  # claimed but not yet in _multi
@@ -125,12 +126,30 @@ class PortfolioManager:
         if not self._running:
             return
         self._running = False
+        self._paused  = False
         self._multi.stop_all()
         self._log("Stopped")
+
+    def pause(self):
+        """Pause new slot opens. Existing positions continue to trail their stops."""
+        if self._running and not self._paused:
+            self._paused = True
+            self._log("Paused — no new positions will open; existing positions continue")
+
+    def resume(self):
+        """Resume opening new slots after a pause."""
+        if self._running and self._paused:
+            self._paused = False
+            self._log("Resumed")
+            threading.Thread(target=self._fill_empty_slots, daemon=True).start()
 
     @property
     def running(self) -> bool:
         return self._running
+
+    @property
+    def paused(self) -> bool:
+        return self._paused
 
     def active_count(self) -> int:
         """Positions in ENTERING or WATCHING state."""
@@ -222,7 +241,7 @@ class PortfolioManager:
         return None
 
     def _open_one_slot(self):
-        if not self._running:
+        if not self._running or self._paused:
             return
 
         if self._candidates_stale():

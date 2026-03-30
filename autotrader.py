@@ -300,7 +300,13 @@ class AutoTrader:
         self._log("STOP", self.status.current_price, "Manually stopped — position remains open")
 
     def set_threshold(self, pct: float):
-        """Adjust trailing stop % live (PCT mode only)."""
+        """Adjust trailing stop % live (PCT mode only).
+
+        This is the ONLY config field that may be mutated after start()/attach().
+        All other TraderConfig fields are treated as read-only once the trader
+        thread has started — mutating them mid-flight can leave the trader in an
+        inconsistent state (e.g. changing entry_mode while scaling is in progress).
+        """
         self.status.config.stop_value = pct
         self.status.threshold_pct     = pct
 
@@ -855,6 +861,14 @@ class MultiTrader:
         logger.info(f"MultiTrader: attached {symbol} qty={qty} entry=${entry_price:.2f}")
         return at
 
+    def set_threshold(self, symbol: str, pct: float):
+        """Adjust trailing stop % live for a WATCHING position (PCT mode only)."""
+        symbol = symbol.upper()
+        with self._loss_lock:
+            at = self._traders.get(symbol)
+        if at and at.status.state == TraderState.WATCHING:
+            at.set_threshold(pct)
+
     def stop(self, symbol: str):
         """Stop a single position by symbol (does not sell)."""
         symbol = symbol.upper()
@@ -872,9 +886,16 @@ class MultiTrader:
                 at.stop()
 
     def statuses(self) -> Dict[str, AutoTraderStatus]:
-        """Return a snapshot of all traders' statuses."""
+        """Return a snapshot copy of all traders' statuses.
+
+        Each value is a frozen copy taken under the lock so the UI never sees a
+        composite update (e.g. state + pnl) in a half-written state.
+        """
         with self._loss_lock:
-            return {sym: at.status for sym, at in self._traders.items()}
+            return {
+                sym: dataclasses.replace(at.status, log=list(at.status.log))
+                for sym, at in self._traders.items()
+            }
 
     def active_symbols(self) -> List[str]:
         """Return symbols currently in WATCHING state."""

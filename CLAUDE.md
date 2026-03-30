@@ -19,9 +19,9 @@ Run with `venv/bin/python -m pytest tests/ -v`
 - `MultiTrader` — dict of AutoTraders, optional daily loss limit
 - `PortfolioManager.start()` sequential · `.start_all()` parallel · refills slots on close
 - `TraderConfig` — stop(PCT/ATR), entry(MARKET/LIMIT/SCALE), take-profit, breakeven, time-stop
-- Alpaca fns shared across pages: `alpaca_get_price/buy/sell/get_bars`
+- Broker callables injected per page: `get_price_fn/buy_fn/sell_fn/get_bars_fn/get_equity_fn` — both Alpaca and IBKR support all pages
+- IBKR caveat: ETF ATR stops may fall back to PCT stops (no intraday high/low bars)
 - `st.session_state.scan_results` — scan results persist across reruns
-- Broker scope: IBKR = Portfolio/Settings/Help only; Alpaca = all pages
 
 ## Branching
 Always develop on the `dev` branch. Never commit directly to `main`. After a release, fast-forward `dev` to `main` so all branches stay in sync.

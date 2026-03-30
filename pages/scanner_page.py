@@ -16,6 +16,13 @@ def render(data_client, get_price_fn, buy_fn, sell_fn, mt, use_hist, as_of_date,
         "**Run a scan → use ⚡ Quick Invest to open positions in one click, "
         "or send to 📈 Portfolio Mode for fully automated hands-off investing.**"
     )
+    if broker == "IBKR":
+        st.info(
+            "**IBKR broker:** ETFs in the scan results may not support ATR-based stops — "
+            "IBKR may not provide intraday high/low bars for ETFs. "
+            "If ATR stop mode is selected for an ETF, AutoTrader will fall back to PCT mode.",
+            icon="ℹ️",
+        )
 
     top_n = st.number_input("How many top candidates to return", min_value=1, max_value=50,
                             value=int(env_get("SCAN_TOP_N", "10")))
@@ -148,7 +155,7 @@ def render(data_client, get_price_fn, buy_fn, sell_fn, mt, use_hist, as_of_date,
         history.append({
             "Time":    st.session_state.scan_ts.strftime("%H:%M:%S"),
             "Market":  market_choice,
-            "Top N":   int(top_n),
+            "Max":     int(top_n),
             "Results": len(st.session_state.scan_results),
             "Skipped": st.session_state.scan_skipped,
             "RSI":     f"{f_rsi_lo}–{f_rsi_hi}",
@@ -204,6 +211,18 @@ def render(data_client, get_price_fn, buy_fn, sell_fn, mt, use_hist, as_of_date,
 
         st.success(f"Found {len(results)} candidates. Select rows then send to AutoTrader.")
 
+        # Sort controls — applied before rendering so Quick Invest order matches what's visible
+        _sortable_cols = [c for c in results.columns if c != "Symbol"]
+        _sort_col = st.session_state.get("scan_sort_col", results.columns[0] if not results.empty else None)
+        if _sort_col not in results.columns:
+            _sort_col = results.columns[0]
+        _sort_asc = st.session_state.get("scan_sort_asc", False)
+        sc1, sc2 = st.columns([3, 1])
+        _sort_col = sc1.selectbox("Sort by", results.columns.tolist(), index=results.columns.tolist().index(_sort_col),
+                                   key="scan_sort_col", label_visibility="collapsed")
+        _sort_asc = sc2.checkbox("Ascending", value=_sort_asc, key="scan_sort_asc")
+        results = results.sort_values(_sort_col, ascending=_sort_asc)
+
         selection = st.dataframe(
             results,
             width="stretch",
@@ -233,7 +252,7 @@ def render(data_client, get_price_fn, buy_fn, sell_fn, mt, use_hist, as_of_date,
             max_n = len(results)
             qi_default_n = n_selected if n_selected else min(5, max_n)
             qi_n = qi3.number_input(
-                "Top N to invest", min_value=1, max_value=max_n,
+                "Positions to open", min_value=1, max_value=max_n,
                 value=qi_default_n, key="qi_n",
                 help="If rows are selected in the table, those symbols are used. Otherwise the top N by score.",
             )
@@ -248,11 +267,19 @@ def render(data_client, get_price_fn, buy_fn, sell_fn, mt, use_hist, as_of_date,
                 f"${qi_dollar:,.0f} each  =  **${total_invest:,.0f} total**"
             )
 
-            if st.button("⚡ Invest Now", type="primary", key="qi_invest"):
+            btn_col1, btn_col2 = st.columns(2)
+            invest_now = btn_col1.button("⚡ Invest Now", type="primary", key="qi_invest")
+            invest_all = btn_col2.button(
+                f"⚡ Invest All ({len(results)} stocks)",
+                key="qi_invest_all",
+                help="Invest in every scan result using the settings above, ignoring the positions-to-open limit.",
+            )
+
+            def _run_invest(syms):
                 st.session_state.pop("qi_summary", None)
                 _open = set(mt.active_symbols()) if mt and hasattr(mt, "active_symbols") else set()
                 summary_rows = []
-                for sym in syms_to_invest:
+                for sym in syms:
                     if sym in _open:
                         summary_rows.append({"Symbol": sym, "Qty": "—", "Price": "—",
                                              "Amount": "—", "Status": "⏭ already open — skipped"})
@@ -278,6 +305,11 @@ def render(data_client, get_price_fn, buy_fn, sell_fn, mt, use_hist, as_of_date,
                             "Status": f"✗ {e}",
                         })
                 st.session_state.qi_summary = summary_rows
+
+            if invest_now:
+                _run_invest(syms_to_invest)
+            if invest_all:
+                _run_invest(list(results.index))
 
             if st.session_state.get("qi_summary"):
                 summary = st.session_state.qi_summary

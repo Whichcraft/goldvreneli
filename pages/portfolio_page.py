@@ -4,6 +4,7 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
 from core import env_get, get_alpaca_clients
+from scanner import UNIVERSE
 
 
 def render(broker, trading_client, data_client, account, ib, gw, alpaca_is_live, ibkr_is_live,
@@ -35,6 +36,84 @@ def _render_alpaca(trading_client, data_client, account, ib, alpaca_is_live):
 
     st.divider()
 
+    # ── Quick actions: ticker strip + cash-out (#48 / #49) ────────────────────
+    try:
+        _all_pos = trading_client.get_all_positions()
+    except Exception:
+        _all_pos = []
+
+    if _all_pos:
+        _sorted_pos = sorted(_all_pos, key=lambda p: float(p.unrealized_plpc), reverse=True)
+        _top3       = _sorted_pos[:3]
+        _bot3       = _sorted_pos[-3:][::-1]   # worst → best within losers
+
+        # Session-scoped dismissed-symbol set — prune symbols no longer open
+        _open_syms = {p.symbol for p in _all_pos}
+        _dismissed = st.session_state.setdefault("_portfolio_dismissed", set())
+        _dismissed &= _open_syms
+
+        def _ticker_card(col, p, action_label, *, sell_fn):
+            plpc  = float(p.unrealized_plpc) * 100
+            color = "green" if plpc >= 0 else "red"
+            col.markdown(f"**{p.symbol}**  :{color}[{plpc:+.1f}%]")
+            if action_label == "Keep":
+                if col.button("Keep", key=f"keep_{p.symbol}", use_container_width=True):
+                    _dismissed.add(p.symbol)
+                    st.rerun()
+            else:
+                confirmed = col.checkbox("Confirm", key=f"sell_confirm_{p.symbol}")
+                if col.button("Sell", key=f"sell_{p.symbol}", use_container_width=True,
+                              disabled=not confirmed):
+                    sell_fn(p)
+                    st.rerun()
+
+        def _do_sell(p):
+            from alpaca.trading.requests import MarketOrderRequest
+            from alpaca.trading.enums import OrderSide, TimeInForce
+            trading_client.submit_order(MarketOrderRequest(
+                symbol=p.symbol, qty=abs(float(p.qty)),
+                side=OrderSide.SELL, time_in_force=TimeInForce.DAY,
+            ))
+
+        # Winners strip
+        winner_cols = st.columns(3)
+        shown_winners = [p for p in _top3
+                         if p.symbol not in _dismissed and float(p.unrealized_plpc) > 0]
+        for col, p in zip(winner_cols, shown_winners):
+            with col.container(border=True):
+                _ticker_card(col, p, "Keep", sell_fn=_do_sell)
+
+        # Losers strip
+        loser_cols = st.columns(3)
+        shown_losers = [p for p in _bot3
+                        if p.symbol not in _dismissed and float(p.unrealized_plpc) < 0]
+        for col, p in zip(loser_cols, shown_losers):
+            with col.container(border=True):
+                _ticker_card(col, p, "Sell", sell_fn=_do_sell)
+
+        # Cash-out all panel
+        with st.expander("☢️ Cash out all positions"):
+            st.warning(
+                f"This will immediately sell all **{len(_all_pos)} open positions** "
+                "using market orders. This cannot be undone.",
+                icon="⚠️",
+            )
+            _confirmed_all = st.checkbox("I understand — sell everything", key="_cashout_all_confirm")
+            if st.button("Cash Out All", type="primary", disabled=not _confirmed_all):
+                _errors = []
+                for _p in _all_pos:
+                    try:
+                        _do_sell(_p)
+                    except Exception as _e:
+                        _errors.append(f"{_p.symbol}: {_e}")
+                if _errors:
+                    st.error("Some orders failed:\n" + "\n".join(_errors))
+                else:
+                    st.success(f"Sell orders submitted for {len(_all_pos)} positions.")
+                st.rerun()
+
+    st.divider()
+
     st.subheader("Open Positions")
 
     def _render_alpaca_positions(tc, label):
@@ -47,13 +126,12 @@ def _render_alpaca(trading_client, data_client, account, ib, alpaca_is_live):
         if pos:
             pos_data = [{
                 "Symbol":       p.symbol,
-                "Qty":          float(p.qty),
+                "Shares":       float(p.qty),
                 "Avg Entry":    f"${float(p.avg_entry_price):.2f}",
                 "Current":      f"${float(p.current_price):.2f}",
                 "Market Value": f"${float(p.market_value):,.2f}",
                 "P&L ($)":      f"${float(p.unrealized_pl):,.2f}",
                 "P&L (%)":      f"{float(p.unrealized_plpc)*100:.2f}%",
-                "Side":         p.side.value,
             } for p in pos]
             st.dataframe(pd.DataFrame(pos_data), width='stretch', hide_index=True)
             fig = go.Figure(go.Bar(
@@ -131,17 +209,21 @@ def _render_alpaca(trading_client, data_client, account, ib, alpaca_is_live):
     st.divider()
 
     st.subheader("Place Order")
+    _universe_opts = sorted(set(UNIVERSE))
+    _default_sym   = st.session_state.get("_order_sym", "AAPL")
+    _default_idx   = _universe_opts.index(_default_sym) if _default_sym in _universe_opts else 0
     with st.form("order_form"):
         c1, c2, c3, c4, c5 = st.columns(5)
-        sym        = c1.text_input("Symbol", value="AAPL").upper()
+        sym        = c1.selectbox("Symbol", _universe_opts, index=_default_idx,
+                                   help="Start typing to filter — pick any stock or ETF from the universe").upper()
         side       = c2.selectbox("Side", ["BUY", "SELL"])
         order_type = c3.selectbox("Type", ["Market", "Limit"])
-        qty        = c4.number_input("Qty", min_value=1.0, value=1.0, step=1.0)
+        qty        = c4.number_input("Shares", min_value=1.0, value=1.0, step=1.0)
         limit_px   = c5.number_input("Limit Price", min_value=0.0, value=0.0, step=0.01,
                                       disabled=(order_type == "Market"))
         submitted  = st.form_submit_button("Submit Order", type="primary")
-
     if submitted:
+        st.session_state["_order_sym"] = sym
         if not sym:
             st.error("Symbol must not be empty.")
             st.stop()
@@ -215,9 +297,13 @@ def _render_ibkr(ib, gw, ibkr_is_live):
         st.info("No open positions.")
     st.divider()
     st.subheader("Place Order")
+    _ib_universe_opts = sorted(set(UNIVERSE))
+    _ib_default_sym   = st.session_state.get("_ibkr_order_sym", "AAPL")
+    _ib_default_idx   = _ib_universe_opts.index(_ib_default_sym) if _ib_default_sym in _ib_universe_opts else 0
     with st.form("ibkr_order_form"):
         c1, c2, c3, c4, c5, c6 = st.columns(6)
-        sym        = c1.text_input("Symbol",   value="AAPL").upper()
+        sym        = c1.selectbox("Symbol", _ib_universe_opts, index=_ib_default_idx,
+                                   help="Start typing to filter symbols").upper()
         exchange   = c2.text_input("Exchange", value="SMART")
         currency   = c3.text_input("Currency", value="USD")
         side       = c4.selectbox("Side", ["BUY", "SELL"])
@@ -227,6 +313,7 @@ def _render_ibkr(ib, gw, ibkr_is_live):
                                       disabled=(order_type == "Market"))
         submitted  = st.form_submit_button("Submit Order", type="primary")
     if submitted:
+        st.session_state["_ibkr_order_sym"] = sym
         try:
             contract = Stock(sym, exchange, currency)
             order    = MarketOrder(side, qty) if order_type == "Market" else LimitOrder(side, qty, limit_px)

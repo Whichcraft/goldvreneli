@@ -550,11 +550,17 @@ def scan(data_client, top_n: int = 10, progress_cb=None,
     with ThreadPoolExecutor(max_workers=min(len(chunks), 4)) as ex:
         futs = {ex.submit(_batch_fetch, data_client, chunk, 80, as_of): len(chunk)
                 for chunk in chunks}
-        for fut in as_completed(futs):
-            bars_map.update(fut.result())
-            done += futs[fut]
-            if progress_cb:
-                progress_cb(min(done, total), total)
+        try:
+            for fut in as_completed(futs, timeout=120):
+                try:
+                    bars_map.update(fut.result())
+                except Exception as _e:
+                    logger.warning("Batch fetch chunk failed (skipping): %s", _e)
+                done += futs[fut]
+                if progress_cb:
+                    progress_cb(min(done, total), total)
+        except TimeoutError:
+            logger.warning("scan(): batch fetch timed out after 120 s — proceeding with %d symbols fetched", len(bars_map))
 
     # ── Score ──────────────────────────────────────────────────────────────
     results = []

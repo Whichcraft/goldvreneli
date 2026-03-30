@@ -113,15 +113,15 @@ In Test Mode, allow the user to select a historical date + time of day to begin 
 ### ~~26. Increase international position coverage (Swiss universe)~~ ✓ fixed in 0.35.4
 Expanded `UNIVERSE_CH` from 9 to ~50 Swiss ADRs + US-listed equities, covering all SMI blue chips and SMIM mid-caps with US OTC ADRs.
 
-### 28. Group Test Mode and Historic Mode together under the Testing sidebar section
+### ~~28. Group Test Mode and Historic Mode together under the Testing sidebar section~~ ✓ fixed in 1.3.0
 Move Test Mode and Historic Mode (the historical simulation from #27) into the same collapsible "Testing" sidebar group so all simulation/dry-run pages are co-located.
 
 ---
 
 ## Reliability
 
-### 29. AutoTraderStatus thread-safety: add a status lock
-`AutoTraderStatus` fields (`current_price`, `pnl`, `state`, `stop_floor`, etc.) are written by the AutoTrader daemon thread and read concurrently by the Streamlit UI thread — with no synchronisation. In CPython this rarely causes corruption due to the GIL, but composite updates (e.g. setting `pnl` and `state` together) can be observed half-updated by the UI. Add a `threading.Lock` to `AutoTrader` and take it on every write to `status` fields and every UI read via a `status` property.
+### ~~29. AutoTraderStatus thread-safety: add a status lock~~ ✓ fixed in 1.3.0
+`AutoTraderStatus` fields (`current_price`, `pnl`, `state`, `stop_floor`, etc.) are written by the AutoTrader daemon thread and read concurrently by the Streamlit UI thread — with no synchronisation. In CPython this rarely causes corruption due to the GIL, but composite updates (e.g. setting `pnl` and `state` together) can be observed half-updated by the UI. Fixed by making `MultiTrader.statuses()` return snapshot copies taken under the lock.
 
 ### ~~30. TraderConfig validation~~ ✓ fixed in 1.1.0
 `TraderConfig` silently accepts nonsensical values that cause wrong or undefined behaviour at runtime:
@@ -137,7 +137,7 @@ Add a `__post_init__` validator that raises `ValueError` on invalid combinations
 ### ~~32. Scale entry partial-fill inconsistency~~ ✓ fixed in 1.1.0
 If `place_buy` raises an exception on tranche 2+ (broker rejection, network error), `_do_scale_entry` breaks out of the loop. `status.qty_remaining` is set to `total_filled` (correct) but `status.qty` is also updated to `total_filled` — however if the exception propagates instead of being caught, the method returns `False` and `_run()` treats the entry as failed, leaving an orphaned partial position with no stop. Wrap each `place_buy` call in a try/except; on failure log the error, break cleanly, and if at least one tranche filled proceed to WATCHING rather than aborting.
 
-### 33. Scanner per-symbol fetch timeout
+### ~~33. Scanner per-symbol fetch timeout~~ ✓ fixed in 1.3.0
 `scan()` has no per-symbol timeout. A single slow or hanging Alpaca API call blocks the entire scan thread indefinitely. Wrap each `fetch_bars()` call with a timeout (e.g. via `concurrent.futures.ThreadPoolExecutor` with a per-task timeout), and count timed-out symbols in the `skipped` report alongside "insufficient history" entries.
 
 ### ~~34. AutoTrader heartbeat timestamp~~ ✓ fixed in 1.1.0
@@ -179,7 +179,7 @@ If `place_buy` raises an exception on tranche 2+ (broker rejection, network erro
 - `reset()` restarts from first bar
 - Raises `ValueError` on empty result after filtering
 
-### 40. PortfolioManager smoke tests
+### ~~40. PortfolioManager smoke tests~~ ✓ fixed in 1.3.0
 `PortfolioManager` has zero test coverage. At minimum:
 - `start_all()` opens N positions up to `target_slots`
 - Closed positions trigger a refill from the candidate list
@@ -190,22 +190,22 @@ Use `MockBroker`-style stubs for `place_buy`, `place_sell`, and `get_price`; inj
 
 ## UX
 
-### 41. Restart AutoTrader from ERROR state
+### ~~41. Restart AutoTrader from ERROR state~~ ✓ fixed in 1.3.0
 Once an `AutoTrader` enters `ERROR` state the user has no way to restart it for the same symbol short of clearing the whole `MultiTrader`. Add a **Restart** button in the AutoTrader positions table (shown only for ERROR-state rows) that calls `at.stop()` then re-queues the symbol with the original config. Confirm before restarting to avoid double-buying.
 
 ### ~~42. Scanner excludes already-open positions~~ ✓ fixed in 1.1.0
 The scanner can recommend a symbol that is already held as an open position in the current `MultiTrader` session. Add a filter: when `mt` is available, subtract `mt.open_symbols()` from the candidate list before ranking so Quick Invest never tries to buy a duplicate.
 
-### 43. Settings page: test API connection button
+### ~~43. Settings page: test API connection button~~ ✓ fixed in 1.3.0
 API keys are saved to `.env` without any validation. Add a **Test connection** button next to the Alpaca key fields that makes a lightweight API call (e.g. `get_account()`) and shows a green checkmark or error inline, without navigating away.
 
 ### ~~44. Export trade history to CSV~~ ✓ fixed in 1.1.0
 `live_fills.json` and `backtest_fills.json` can only be inspected in-app. Add a **Download CSV** button on the AutoTrader and Backtest pages that converts the current session's fills to CSV and triggers a browser download via `st.download_button`.
 
-### 49. Portfolio top/bottom ticker strip with keep/sell quick actions
+### ~~49. Portfolio top/bottom ticker strip with keep/sell quick actions~~ ✓ fixed in 1.3.0
 Add a compact strip or card row at the top of the Portfolio page showing the best and worst performing open positions (e.g. top 3 winners and top 3 losers by unrealised P&L %). Each card shows symbol, current P&L %, and two quick-action buttons — **Keep** (dismisses the card until next rerun) and **Sell** (closes the position immediately, with a brief confirmation). Makes it trivial to act on outliers without scrolling through the full table.
 
-### 48. Cash-out panel: liquidate everything or highlight best holdings
+### ~~48. Cash-out panel: liquidate everything or highlight best holdings~~ ✓ fixed in 1.3.0
 Add a prominent panel (e.g. top of Portfolio or AutoTrader page) with two quick actions:
 - **Cash out all** — one-click button (with confirmation) that sells every open position immediately
 - **Best holdings highlight** — sort open positions by unrealised P&L and visually surface the top performers (e.g. coloured badges or a pinned top-N table) so the user can decide at a glance which ones to realise
@@ -217,6 +217,38 @@ Root cause: `days=60` (calendar) ≈ 42 trading days < 52 required by `score_sym
 ### ~~50. Remove backtest completely~~ ✓ fixed in 1.2.0
 Removed `pages/backtest_page.py` and all nav/dispatch references. `replay.py` retained (used by Test Mode and tests).
 
+### ~~57. Highlight active broker/mode in the sidebar~~ ✓ fixed in 1.4.0
+The sidebar header currently says "Alpaca Paper and Live Trading" and "Interactive Brokers (IBKR)" but gives no visual indication of which broker and mode is actually active. Replaced plain captions with `🟢 Active: Alpaca · Live` / `🟡 Active: Alpaca · Paper` badges.
+
+---
+
+## Reliability
+
+### ~~58. Scanner: unhandled TimeoutError and per-future exceptions in `scan()`~~ ✓ fixed in 1.4.0
+`as_completed(futs, timeout=120)` raises `concurrent.futures.TimeoutError` if not all futures complete within 120 s. Fixed: loop wrapped in `try/except TimeoutError`; individual chunk failures caught and skipped.
+
+### ~~59. AutoTrader: live trailing-stop adjustment per position~~ ✓ fixed in 1.4.0
+`AutoTrader.set_threshold(pct)` already mutates `stop_value` and `threshold_pct` live, but it is never exposed in the UI. Added number input in each WATCHING position card; calls `mt.set_threshold(sym, new_pct)` on change.
+
+### ~~60. Portfolio Mode: pause button (halt new opens, keep monitoring existing)~~ ✓ fixed in 1.4.0
+Added `pm.pause()` / `pm.resume()` API and ⏸ Pause / ▶ Resume buttons. `_open_one_slot` returns immediately when `_paused=True`.
+
+### ~~61. Settings: IBKR gateway test button~~ ✓ fixed in 1.4.0
+Added "Test IBKR Gateway" button that checks `ib.isConnected()` and queries `accountSummary()`, showing net liquidation on success.
+
+---
+
+## UX
+
+### ~~62. Portfolio ticker strip: stale dismissed-symbol set~~ ✓ fixed in 1.4.0
+The `_portfolio_dismissed` set in `st.session_state` accumulates symbols across reruns but is never pruned. Fixed: `_dismissed &= _open_syms` on every render.
+
+### ~~63. Portfolio Mode: force-rescan button~~ ✓ fixed in 1.4.0
+Added **🔄 Rescan** button next to the scan-age caption that triggers `pm._rescan()` in a background thread.
+
+### ~~64. Scanner results: user-controlled sort column~~ ✓ fixed in 1.4.0
+Added sort-column selectbox + ascending checkbox above the results table. Sort applied to `results` DataFrame before both rendering and Quick Invest, so top-N picks always match the visible order.
+
 ---
 
 ## Small wins
@@ -224,11 +256,27 @@ Removed `pages/backtest_page.py` and all nav/dispatch references. `replay.py` re
 ### ~~45. Surface unavailable OTC symbols separately in scanner skipped count~~ ✓ fixed in 1.1.0
 With ~94 Swiss symbols (many OTC), a significant fraction will fail data fetch entirely (no Alpaca coverage) rather than fail the 52-bar check. Currently both are lumped into the same "skipped" count. Split into `skipped_no_data` vs `skipped_insufficient_history` and show both in the scanner caption.
 
-### 46. Scanner: warn on ETF in ATR-stop mode
+### ~~52. Replace "(N)" quantity notation with a meaningful label~~ ✓ fixed in 1.3.1
+
+Throughout the UI, quantities are shown as bare numbers like "(3)" or "Top N" with no unit. Replace with a human-readable label — e.g. "3 positions", "5 stocks", or similar — so users immediately understand what the number refers to.
+
+### ~~46. Scanner: warn on ETF in ATR-stop mode~~ ✓ fixed in 1.3.0
 ATR stop needs `get_bars` to return a DataFrame with `high`/`low`/`close`. For ETFs and OTC ADRs, some brokers (esp. IBKR) do not return intraday bars with `high`/`low`. Surface a one-time warning if the selected universe contains ETFs and the stop mode is ATR.
 
-### 47. Lock `TraderConfig` after `start()` / `attach()`
+### ~~47. Lock `TraderConfig` after `start()` / `attach()`~~ ✓ fixed in 1.3.0
 `set_threshold()` mutates `status.config.stop_value` live, which is intentional. But other config fields (entry mode, scale tranches, tp fraction) can also be mutated in-flight from the UI with no safety guard, potentially leaving the trader in an inconsistent mid-entry state. Mark config fields that must not change after entry as read-only (e.g. with `frozen=True` on a sub-dataclass) or document the invariant and guard mutations with a state check.
+
+### ~~53. Clarify meaning of `side: long` in open positions~~ ✓ fixed in 1.3.1
+Open positions include a `side: long` field — investigate what this means and whether it is needed. Is it ever anything other than `long`? If not, it may be dead data that can be removed. Confirmed always "long" (long-only strategy) — removed column.
+
+### ~~54. Autocomplete symbol name on place order~~ ✓ fixed in 1.3.1
+When entering a ticker symbol in the place-order input, provide autocomplete suggestions (e.g. from the scanner universe or a broker symbol search) so users don't have to remember exact symbols.
+
+### ~~55. Verify positions are re-filled on sell with a good candidate~~ ✓ verified in 1.3.0
+Confirm that when a position closes, `PortfolioManager` correctly refills the slot from the candidate list — specifically that a fresh scan candidate is used and the slot count stays at target. Covered by `test_refill_on_close` in `tests/test_portfolio.py`.
+
+### ~~56. Verify top price is recalculated on price changes~~ ✓ verified in 1.3.1
+Check whether the trailing-stop peak price (`status.top_price`) is updated on every price poll or only on entry. Confirmed: `autotrader.py:556` updates `peak_price` on every poll iteration, and `_update_stop_floor()` is called immediately. ATR stop tests cover this implicitly.
 
 ---
 

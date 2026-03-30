@@ -90,7 +90,7 @@ Scans ~600 liquid US stocks, ETFs, and ADRs using daily bar data and technical i
 
 | Control | Description |
 |---------|-------------|
-| Top N | Number of candidates to return |
+| Max scan results | Maximum number of top-ranked candidates to return |
 | Historical date | Tick to scan as of a past date (uses closing data up to that date) |
 | Symbol list | Expand to choose individual symbols or scan the full universe. Pre-populated from your watchlist in Settings. |
 

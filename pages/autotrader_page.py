@@ -245,6 +245,18 @@ def render(mt, get_price_fn, buy_fn, sell_fn, get_bars_fn, get_equity_fn, broker
                         st.markdown(f"**P&L:** :{pnl_color}[${s.pnl:+,.2f}]")
                         pct = min(s.drawdown_pct / s.threshold_pct, 1.0) if s.threshold_pct else 0.0
                         st.progress(pct, text=f"Drawdown {s.drawdown_pct:.2f}% / {s.threshold_pct:.2f}%")
+
+                        # Live trailing-stop adjustment (PCT mode only)
+                        if s.config.stop_mode.value == "pct":
+                            new_stop = st.number_input(
+                                "Trailing stop %", min_value=0.1, max_value=50.0, step=0.1,
+                                value=float(s.config.stop_value),
+                                key=f"thresh_{sym}",
+                                label_visibility="collapsed",
+                            )
+                            if abs(new_stop - s.config.stop_value) > 0.001:
+                                mt.set_threshold(sym, new_stop)
+
                         # Stall warning: if last poll was more than 3× poll_interval ago
                         if s.last_poll_at is not None:
                             lag = (datetime.now() - s.last_poll_at).total_seconds()
@@ -254,6 +266,24 @@ def render(mt, get_price_fn, buy_fn, sell_fn, get_bars_fn, get_equity_fn, broker
                             st.caption("Breakeven active — stop floor at entry")
                         if s.tp_executed:
                             st.caption("Take-profit executed — trailing remaining shares")
+
+            # Error-state positions — allow restart
+            errored = [(sym, s) for sym, s in statuses.items()
+                       if s.state == TraderState.ERROR]
+            if errored:
+                st.markdown("**Errored positions**")
+                for sym, s in errored:
+                    with st.container(border=True):
+                        ec1, ec2 = st.columns([4, 1])
+                        ec1.markdown(f":red[**{sym}**] — ERROR")
+                        if s.entry_price:
+                            ec1.caption(f"Entry ${s.entry_price:.2f}  ·  Qty {s.qty}")
+                        confirmed = st.checkbox(f"Confirm restart {sym}", key=f"err_confirm_{sym}")
+                        if ec2.button("Restart", key=f"restart_{sym}", disabled=not confirmed):
+                            import dataclasses
+                            mt.stop(sym)
+                            mt.start(sym, s.qty, dataclasses.replace(s.config))
+                            st.rerun()
 
             # Daily summary
             st.divider()

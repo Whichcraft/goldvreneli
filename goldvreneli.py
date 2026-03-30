@@ -48,18 +48,18 @@ with st.sidebar:
         alpaca_is_live = st.toggle("Live Trading", key="alpaca_live")
         ibkr_is_live = False
         if alpaca_is_live:
-            st.caption(":red[**⚠️ LIVE — real money**]")
-            st.caption("Alpaca · Live account")
+            st.markdown(":red[**⚠️ LIVE TRADING — real money**]")
+            st.markdown("🟢 **Active:** Alpaca · Live")
         else:
-            st.caption("Alpaca · Paper account")
+            st.markdown("🟡 **Active:** Alpaca · Paper")
     else:
         alpaca_is_live = False
         ibkr_is_live = st.toggle("Live Trading", key="ibkr_live")
         if ibkr_is_live:
-            st.caption(":red[**⚠️ LIVE — real money**]")
-            st.caption("IBKR · Live account")
+            st.markdown(":red[**⚠️ LIVE TRADING — real money**]")
+            st.markdown("🟢 **Active:** IBKR · Live")
         else:
-            st.caption("IBKR · Paper account")
+            st.markdown("🟡 **Active:** IBKR · Paper")
 
     st.divider()
 
@@ -102,6 +102,12 @@ with st.sidebar:
     # Selecting test nav clears the main nav highlight by overriding active page
     if test_page:
         page = test_page
+    use_hist = st.toggle("🧪 Historic data mode", key="use_hist")
+    if use_hist:
+        as_of_date = st.date_input("As-of date", value=_dt_now.now().date(), key="as_of_date")
+        st.caption("Scanner uses closing data up to this date.")
+    else:
+        as_of_date = _dt_now.now().date()
 
     st.divider()
 
@@ -111,14 +117,6 @@ with st.sidebar:
         st.caption("1. 🔍 **Scanner** — find best stocks")
         st.caption("2. ⚡ **Quick Invest** — one click to open positions")
         st.caption("3. 📈 **Portfolio Mode** — fully automated, hands-off")
-
-    st.divider()
-    use_hist = st.toggle("🧪 Historic data mode", key="use_hist")
-    if use_hist:
-        as_of_date = st.date_input("As-of date", value=_dt_now.now().date(), key="as_of_date")
-        st.caption("Scanner uses closing data up to this date.")
-    else:
-        as_of_date = _dt_now.now().date()
 
     st.divider()
     st.caption("Alpaca Paper/Live · IBKR · MIT License")
