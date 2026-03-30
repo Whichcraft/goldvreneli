@@ -238,6 +238,10 @@ create_env_file() {
 ALPACA_PAPER_API_KEY=${ALPACA_KEY}
 ALPACA_PAPER_SECRET_KEY=${ALPACA_SECRET}
 
+# ── Alpaca Live Trading (required only for live mode) ─────────────────────────
+ALPACA_LIVE_API_KEY=
+ALPACA_LIVE_SECRET_KEY=
+
 # ── IBKR Credentials ─────────────────────────────────────────────────────────
 IBKR_USERNAME=${IBKR_USER}
 IBKR_PASSWORD=${IBKR_PASS}
@@ -248,15 +252,25 @@ IBC_PATH=${IBC_DIR}
 GATEWAY_PATH=${GW_VERSION_PATH:-$GATEWAY_DIR}
 
 # ── AutoTrader defaults ───────────────────────────────────────────────────────
-AT_SYMBOL=AAPL
+AT_SYMBOL=
 AT_THRESHOLD=0.5
 AT_POLL=5
+AT_DAILY_LOSS_LIMIT=0
+
+# ── Portfolio Mode defaults ───────────────────────────────────────────────────
+PM_TARGET_SLOTS=10
+PM_SLOT_PCT=10.0
 
 # ── Scanner defaults ──────────────────────────────────────────────────────────
 SCAN_TOP_N=10
-SCAN_RSI_LO=40
-SCAN_RSI_HI=65
-SCAN_VOL_MULT=1.5
+SCAN_MIN_PRICE=5.0
+SCAN_MIN_ADV_M=5.0
+SCAN_RSI_LO=35
+SCAN_RSI_HI=72
+SCAN_VOL_MULT=1.0
+SCAN_SMA20_TOL=3.0
+SCAN_MIN_RET5D=-1.0
+SCAN_WATCHLIST=
 EOF
     success ".env created."
 }
@@ -318,6 +332,12 @@ do_update() {
     else
         info "Updating v$CUR_VERSION → v$NEW_VERSION"
     fi
+
+    # Reload PROD_FILES from the new version so renamed/added files are included
+    mapfile -t PROD_FILES < <(
+        sed -n '/^PROD_FILES=(/,/^)/{/^PROD_FILES=(/d;/^)/d;s/[[:space:]]//g;/^$/d;p}' \
+            "$TMP_REPO/goldvreneli-install.sh"
+    )
 
     info "Deploying updated production files…"
     deploy_files "$TMP_REPO" "$INSTALL_DIR"
