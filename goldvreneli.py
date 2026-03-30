@@ -1,5 +1,6 @@
 import os
 import time
+from datetime import datetime as _dt_now
 import streamlit as st
 import plotly.graph_objects as go
 import pandas as pd
@@ -70,6 +71,14 @@ with st.sidebar:
         st.caption("1. 🔍 **Scanner** — find best stocks")
         st.caption("2. ⚡ **Quick Invest** — one click to open positions")
         st.caption("3. 📈 **Portfolio Mode** — fully automated, hands-off")
+
+    st.divider()
+    use_hist = st.toggle("🧪 Test mode (historic data)", key="use_hist")
+    if use_hist:
+        as_of_date = st.date_input("As-of date", value=_dt_now.now().date(), key="as_of_date")
+        st.caption("Scanner uses closing data up to this date.")
+    else:
+        as_of_date = _dt_now.now().date()
 
     st.divider()
     st.caption("Alpaca Paper/Live · IBKR · MIT License")
@@ -1156,12 +1165,8 @@ if broker == "Alpaca":
             "or send to 📈 Portfolio Mode for fully automated hands-off investing.**"
         )
 
-        col_a, col_b, col_c = st.columns([1, 2, 2])
-        top_n      = col_a.number_input("Top N results", min_value=1, max_value=50,
-                                         value=int(env_get("SCAN_TOP_N", "10")))
-        use_hist   = col_b.checkbox("Historical date", value=False)
-        as_of_date = col_c.date_input("As-of date", value=datetime.now().date(),
-                                       disabled=not use_hist)
+        top_n = st.number_input("How many top candidates to return", min_value=1, max_value=50,
+                                value=int(env_get("SCAN_TOP_N", "10")))
 
         # ── Market selector ────────────────────────────────────────────────────
         market_choice = st.radio(
