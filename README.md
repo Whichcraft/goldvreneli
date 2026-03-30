@@ -186,7 +186,19 @@ Multiple AutoTrader instances run in parallel under a single **MultiTrader** ses
 
 **Daily loss limit** — set in Settings; blocks new entries once cumulative realized losses for the session reach the limit.
 
+**Max loss from entry (%)** — hard per-position exit guard. When set, AutoTrader sells immediately if the price drops this % below the entry price, regardless of the trailing stop level. Checked more frequently than the trailing stop (1 s sub-ticks) and takes priority over the time-stop.
+
 **Symbol queue** — configure and start one symbol; the next in your selection pre-fills the form automatically.
+
+> ### ⚠️ RISK — Losses may exceed configured stop values
+>
+> No software-side stop can fully guarantee a loss ceiling. Two structural gaps remain even with all guards active:
+>
+> **Overnight / halt gap-downs** — markets close between sessions. If a stock gaps down at the next open (earnings, news, macro event), the first tradeable price may be far below your stop floor or max-loss threshold. AutoTrader cannot place orders while the market is closed; the guard fires at the first polled price after open, which may already reflect a large gap.
+>
+> **Broker fill slippage** — AutoTrader triggers a **market sell order** when a stop fires. The actual broker fill price is set by the market at execution time and is not guaranteed. In fast-moving or illiquid conditions the fill may be materially worse than the price that triggered the sell, resulting in a realized loss larger than the configured threshold.
+>
+> **Mitigation:** use `Max loss from entry (%)` as a second line of defence against gap-downs; prefer liquid, high-ADV symbols; avoid holding positions overnight if loss limits are critical; consider broker-native stop-loss orders (not currently placed by AutoTrader) for hard guarantees at the exchange level.
 
 ### 📈 Portfolio Mode
 
