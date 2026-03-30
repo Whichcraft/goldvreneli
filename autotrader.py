@@ -285,6 +285,47 @@ class AutoTrader:
         self.status.config.stop_value = pct
         self.status.threshold_pct     = pct
 
+    def attach(
+        self,
+        symbol:      str,
+        qty:         int,
+        entry_price: float,
+        config:      Optional[TraderConfig] = None,
+    ):
+        """
+        Attach to an already-held position — skip the buy order and start
+        monitoring immediately from *entry_price*.
+
+        Useful when the app restarts with open broker positions that should be
+        managed with a trailing stop.
+        """
+        if qty < 1:
+            raise ValueError(f"qty must be at least 1, got {qty}")
+        if not symbol or not symbol.strip():
+            raise ValueError("symbol must not be empty")
+        if self.status.state in (TraderState.ENTERING, TraderState.WATCHING):
+            raise RuntimeError(f"AutoTrader already active ({self.status.state.value}).")
+
+        config = dataclasses.replace(config) if config else TraderConfig()
+
+        self.status = AutoTraderStatus(
+            symbol        = symbol.upper(),
+            qty           = qty,
+            qty_remaining = qty,
+            entry_price   = entry_price,
+            peak_price    = entry_price,
+            config        = config,
+            entry_time    = datetime.now(),
+            state         = TraderState.WATCHING,  # skip entry phase in _run()
+        )
+        self._stop_event.clear()
+        self._bars_cache      = None
+        self._bars_fetched_at = 0.0
+
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+        logger.info(f"AutoTrader attached: {symbol} qty={qty} entry=${entry_price:.2f}")
+
     # ── Internal: entry ────────────────────────────────────────────────────────
 
     def _do_market_entry(self) -> bool:
@@ -348,6 +389,7 @@ class AutoTrader:
 
         if total_filled == 0:
             return False
+        self.status.qty           = total_filled
         self.status.qty_remaining = total_filled
         self.status.entry_price   = total_cost / total_filled
         # Refresh peak after all tranches filled
@@ -413,19 +455,26 @@ class AutoTrader:
         cfg = self.status.config
         s   = self.status
 
-        # ── Entry phase ──────────────────────────────────────────────────────
-        s.state = TraderState.ENTERING
+        # ── Entry phase (skipped when attach() pre-set state=WATCHING) ───────
+        if s.state != TraderState.WATCHING:
+            s.state = TraderState.ENTERING
 
-        if cfg.entry_mode == EntryMode.MARKET:
-            entered = self._do_market_entry()
-        elif cfg.entry_mode == EntryMode.LIMIT:
-            entered = self._do_limit_entry()
-        else:  # SCALE
-            entered = self._do_scale_entry()
+            if cfg.entry_mode == EntryMode.MARKET:
+                entered = self._do_market_entry()
+            elif cfg.entry_mode == EntryMode.LIMIT:
+                entered = self._do_limit_entry()
+            else:  # SCALE
+                entered = self._do_scale_entry()
 
-        if not entered or self._stop_event.is_set():
-            s.state = TraderState.STOPPED
-            return
+            if not entered or self._stop_event.is_set():
+                s.state = TraderState.STOPPED
+                return
+
+            s.state = TraderState.WATCHING
+        else:
+            # Attach path — record initial state so the trade log isn't empty
+            self._log("INFO", s.entry_price,
+                      f"Attached to existing position: {s.qty} × {s.symbol} @ ${s.entry_price:.2f}")
 
         # Initial ATR fetch and stop floor
         self._update_stop_floor()
@@ -440,8 +489,6 @@ class AutoTrader:
         if cfg.stop_mode == StopMode.ATR and s.atr_value > 0:
             self._log("INFO", s.entry_price,
                       f"ATR(14) = ${s.atr_value:.2f} → stop distance ${s.atr_value * cfg.stop_value:.2f}")
-
-        s.state = TraderState.WATCHING
 
         # ── Monitor loop ─────────────────────────────────────────────────────
         while not self._stop_event.is_set():
@@ -624,6 +671,51 @@ class MultiTrader:
                  threshold_pct=threshold_pct, poll_interval=poll_interval)
 
         logger.info(f"MultiTrader: started {symbol} qty={qty}")
+        return at
+
+    def attach(
+        self,
+        symbol:      str,
+        qty:         int,
+        entry_price: float,
+        config:      Optional[TraderConfig] = None,
+        on_close:    Optional[Callable[[float], None]] = None,
+    ) -> "AutoTrader":
+        """
+        Attach trailing-stop monitoring to an existing broker position without
+        placing a buy order.  Useful when the app restarts with open positions.
+        """
+        symbol = symbol.upper().strip()
+        if not symbol:
+            raise ValueError("symbol must not be empty")
+        if qty < 1:
+            raise ValueError(f"qty must be at least 1, got {qty}")
+
+        with self._loss_lock:
+            if symbol in self._traders and self._traders[symbol].status.state in (
+                TraderState.ENTERING, TraderState.WATCHING
+            ):
+                raise RuntimeError(f"{symbol} is already active.")
+
+            at = AutoTrader(
+                get_price  = self._get_price,
+                place_buy  = self._place_buy,
+                place_sell = self._place_sell,
+                get_bars   = self._get_bars,
+            )
+
+            def _on_close(pnl: float):
+                if pnl < 0:
+                    with self._loss_lock:
+                        self._realized_loss += abs(pnl)
+                if on_close:
+                    on_close(pnl)
+
+            at._on_close = _on_close
+            self._traders[symbol] = at
+
+        at.attach(symbol, qty, entry_price, config=config)
+        logger.info(f"MultiTrader: attached {symbol} qty={qty} entry=${entry_price:.2f}")
         return at
 
     def stop(self, symbol: str):

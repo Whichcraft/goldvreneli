@@ -1,6 +1,6 @@
 # Goldvreneli Trading Dashboard
 
-![Version](https://img.shields.io/badge/version-0.21.0-blue)
+![Version](https://img.shields.io/badge/version-0.22.0-blue)
 
 A Streamlit-based trading dashboard supporting **Alpaca Paper and Live Trading** and **Interactive Brokers (IBKR)** via IB Gateway, with automated trailing-stop trading, technical scanning, portfolio automation, and offline backtesting.
 
@@ -220,9 +220,17 @@ Portfolio Mode is **fully autonomous**. You configure it once and it runs indefi
 
 **Candidate list** — scanned fresh at startup and re-scanned automatically when older than 30 minutes. Already-open symbols are skipped; the next-best is chosen instead.
 
+**📥 Monitor existing positions** — if the app restarts while positions are still open in your account, use the *Monitor existing account positions* expander at the bottom of the Portfolio Mode page. It lists positions not yet being tracked and lets you attach a trailing-stop monitor to them without placing any new orders.
+
 ### 🔍 Scanner
 
-Scans ~600 liquid US stocks, ETFs, and ADRs using daily Alpaca bars and pandas-ta indicators.
+Scans liquid stocks, ETFs, and ADRs using daily Alpaca bars and pandas-ta indicators. Choose market scope with the **Market** radio at the top of the page:
+
+| Selection | Universe |
+|-----------|----------|
+| 🇺🇸 US | ~500 US-incorporated equities and US-focused ETFs |
+| 🌍 International | Foreign ADRs (Europe, Asia, LatAm, Canada) + country/regional ETFs |
+| 🌐 All | Full combined universe (~600+ symbols) |
 
 **Hard filters** (all must pass)
 

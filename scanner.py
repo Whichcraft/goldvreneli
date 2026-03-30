@@ -53,14 +53,14 @@ class ScanFilters:
         if self.vol_mult < 0:
             raise ValueError("vol_mult must be non-negative")
 
-# Liquid universe — large/mid-cap US equities, ETFs, and ADRs (~600 symbols)
-UNIVERSE = [
+# ── US universe — US-incorporated equities and US-focused ETFs ─────────────────
+UNIVERSE_US = [
     # Mega-cap tech
     "AAPL", "MSFT", "NVDA", "GOOGL", "GOOG", "META", "AMZN", "TSLA",
-    # Semiconductors
+    # Semiconductors (US)
     "AMD", "INTC", "QCOM", "AVGO", "TXN", "MU", "AMAT", "LRCX", "KLAC", "MRVL",
-    "ON", "SMCI", "MPWR", "WOLF", "SWKS", "QRVO", "MCHP", "ADI", "NXPI", "STM",
-    "ASML", "TSM", "SLAB", "ACLS", "ONTO", "COHU", "FORM",
+    "ON", "SMCI", "MPWR", "WOLF", "SWKS", "QRVO", "MCHP", "ADI", "NXPI",
+    "SLAB", "ACLS", "ONTO", "COHU", "FORM",
     # Software / Cloud
     "ORCL", "CRM", "ADBE", "NOW", "SNOW", "DDOG", "MDB", "VEEV", "WDAY", "ZM",
     "HUBS", "TTD", "GTLB", "CFLT", "NET", "OKTA", "ZS", "FTNT", "PANW", "CRWD",
@@ -70,9 +70,9 @@ UNIVERSE = [
     # Hardware / Networking
     "ANET", "HPE", "DELL", "WDC", "STX", "PSTG", "NTAP", "VIAV", "CIEN",
     "INFN", "CALX", "LITE", "IIVI", "COHR", "NPKI",
-    # Internet / E-commerce / Social
-    "SHOP", "EBAY", "PINS", "SNAP", "RDDT", "ABNB", "UBER", "LYFT", "DASH",
-    "ETSY", "MELI", "SE", "GRAB", "CARG", "YELP", "ANGI", "IAC",
+    # Internet / E-commerce / Social (US)
+    "EBAY", "PINS", "SNAP", "RDDT", "ABNB", "UBER", "LYFT", "DASH",
+    "ETSY", "CARG", "YELP", "ANGI", "IAC",
     "TWLO", "SEND", "BAND", "MSGM", "MTCH", "BMBL", "GRINDR",
     # Finance — banks
     "JPM", "BAC", "WFC", "C", "GS", "MS", "USB", "PNC", "TFC", "COF",
@@ -87,10 +87,10 @@ UNIVERSE = [
     # Finance — insurance
     "CB", "AIG", "MET", "PRU", "AFL", "ALL", "PGR", "TRV", "HIG", "L",
     "RE", "RNR", "ACGL", "ERIE", "CINF",
-    # Healthcare — large pharma
-    "LLY", "JNJ", "ABBV", "MRK", "PFE", "BMY", "AZN", "NVO", "SNY", "GSK",
-    # Healthcare — biotech
-    "AMGN", "GILD", "REGN", "VRTX", "BIIB", "INCY", "MRNA", "BNTX",
+    # Healthcare — large pharma (US)
+    "LLY", "JNJ", "ABBV", "MRK", "PFE", "BMY",
+    # Healthcare — biotech (US)
+    "AMGN", "GILD", "REGN", "VRTX", "BIIB", "INCY", "MRNA",
     "SGEN", "ALNY", "IONS", "EXEL", "HALO", "JAZZ", "ACAD", "SAGE",
     "FOLD", "RARE", "BLUE", "EDIT", "NTLA", "BEAM", "CRSP", "PACB",
     # Healthcare — managed care / services
@@ -116,18 +116,16 @@ UNIVERSE = [
     # Consumer discretionary — restaurants / leisure
     "MCD", "SBUX", "YUM", "DPZ", "CMG", "DRI", "TXRH", "DENN", "JACK",
     "EAT", "CAKE", "RRGB", "SHAK", "WING", "BROS", "NDLS",
-    # Consumer discretionary — apparel / brands
-    "NKE", "LULU", "PVH", "RL", "VFC", "UAA", "UA", "CROX", "DECK",
-    "SKX", "ONON", "BIRK", "GOOS",
-    # Consumer discretionary — autos
-    "F", "GM", "STLA", "TM", "HMC", "RIVN", "LCID", "NIO", "XPEV", "LI",
-    "RACE", "HOG", "THRM", "LEA", "MGA", "BWA",
+    # Consumer discretionary — apparel / brands (US)
+    "NKE", "LULU", "PVH", "RL", "VFC", "UAA", "UA", "CROX", "DECK", "SKX",
+    # Consumer discretionary — autos (US)
+    "F", "GM", "RIVN", "LCID", "HOG", "THRM", "LEA", "MGA", "BWA",
     # Consumer discretionary — travel / lodging
     "MAR", "HLT", "H", "IHG", "WH", "RCL", "CCL", "NCLH", "VAC",
     "TNL", "PLYA", "SOND",
-    # Consumer staples
+    # Consumer staples (US)
     "PG", "KO", "PEP", "MDLZ", "GIS", "K", "HRL", "SJM", "MKC",
-    "PM", "MO", "BTI", "STZ", "BUD", "TAP", "SAM", "MNST", "CELH",
+    "PM", "MO", "STZ", "TAP", "SAM", "MNST", "CELH",
     "CHD", "CLX", "CL", "EL", "COTY", "REV",
     # Industrials — defense
     "LMT", "RTX", "NOC", "GD", "BA", "HII", "TDG", "LDOS", "SAIC", "BAH", "CACI",
@@ -135,8 +133,8 @@ UNIVERSE = [
     "CAT", "DE", "EMR", "ETN", "PH", "ROK", "XYL", "CARR", "OTIS",
     "MMM", "HON", "GE", "ITW", "DOV", "FTV", "GNRC", "RRX", "AME",
     "ACCO", "CFX", "FELE", "HLIO", "AIRC",
-    # Industrials — transport
-    "UPS", "FDX", "JBHT", "CSX", "NSC", "UNP", "CNI", "CP",
+    # Industrials — transport (US)
+    "UPS", "FDX", "JBHT", "CSX", "NSC", "UNP",
     "DAL", "UAL", "AAL", "LUV", "ALK", "SAVE",
     "CHRW", "EXPD", "XPO", "SAIA", "ODFL", "WERN", "KNX",
     # Materials
@@ -172,15 +170,44 @@ UNIVERSE = [
     "TLT", "IEF", "SHY", "GOVT", "BND", "AGG",
     "HYG", "JNK", "LQD", "EMB",
     "UUP", "FXE", "FXY", "FXB",
-    # International ETFs
+]
+
+# ── International universe — foreign ADRs and country/regional ETFs ────────────
+UNIVERSE_INTL = [
+    # Semiconductors (foreign)
+    "ASML", "TSM", "STM",
+    # Internet / E-commerce (foreign)
+    "SHOP", "MELI", "SE", "GRAB",          # Canada, LatAm, SE Asia
+    "BIDU", "JD", "PDD",                   # China
+    # Technology (foreign)
+    "SONY", "SAP",                         # Japan, Germany
+    # Healthcare — pharma (foreign)
+    "AZN", "NVO", "SNY", "GSK", "BNTX",   # UK, Denmark, France, UK, Germany
+    # Autos (foreign)
+    "TM", "HMC",                           # Japan
+    "STLA", "RACE",                        # Italy/Netherlands
+    "NIO", "XPEV", "LI",                   # China
+    # Consumer — apparel (foreign)
+    "ONON", "BIRK", "GOOS",               # Switzerland, Denmark, Canada
+    # Consumer staples (foreign)
+    "BUD", "BTI",                          # Belgium, UK
+    # Energy (foreign)
+    "BP", "SHEL",                          # UK
+    # Finance (foreign)
+    "SAN", "HSBC", "RY", "TD",            # Spain, UK, Canada, Canada
+    # Materials (foreign)
+    "BHP", "RIO", "VALE",                  # Australia, UK, Brazil
+    # Transport (foreign)
+    "CNI", "CP",                           # Canada
+    # International / regional ETFs
     "EFA", "EEM", "VEA", "VWO", "IEFA", "IEMG",
     "EWJ", "EWZ", "EWC", "EWG", "EWU", "EWA", "EWH", "EWY", "EWT",
     "FXI", "MCHI", "KWEB", "CQQQ",
     "INDA", "INDY", "EPI",
 ]
 
-# De-duplicate
-UNIVERSE = list(dict.fromkeys(UNIVERSE))
+# Combined universe (backward-compatible)
+UNIVERSE = list(dict.fromkeys(UNIVERSE_US + UNIVERSE_INTL))
 
 
 def fetch_bars(data_client, symbol: str, days: int = 90,
@@ -262,7 +289,7 @@ def score_symbol(bars: pd.DataFrame,
     rs_20d = ret_20d - spy.get("20d", 0)
 
     # ── Trend consistency ──────────────────────────────────────────────────
-    sma_slope = (sma20 - sma20_prev) / sma20_prev * 100 if sma20_prev else 0
+    sma_slope = (sma20 - sma20_prev) / sma20_prev * 100 if (sma20_prev and not pd.isna(sma20_prev)) else 0
     above_both = 1 if last_price > sma20 and sma20 > sma50 else 0
 
     # ── Composite score (higher = better) ────────────────────────────────────

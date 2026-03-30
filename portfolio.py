@@ -242,6 +242,8 @@ class PortfolioManager:
                 qty    = max(1, int(equity * self._slot_pct / 100.0 / price))
         except Exception as e:
             self._log(f"Sizing error for {sym}: {e}", "ERROR")
+            with self._lock:
+                self._claimed.discard(sym)
             return
 
         def on_close(pnl: float, _sym=sym):

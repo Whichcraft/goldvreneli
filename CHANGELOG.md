@@ -8,6 +8,17 @@ All notable changes to this project will be documented here.
 
 ---
 
+## [0.22.0] — 2026-03-30
+
+### Added
+- **Scanner: 🇺🇸 / 🌍 / 🌐 Market selector** — radio button on the Scanner page to choose US (~500 symbols), International (foreign ADRs + country ETFs), or All (combined); scanner symbol list and multiselect update accordingly
+- `scanner.py`: `UNIVERSE_US` (US equities + US-focused ETFs) and `UNIVERSE_INTL` (foreign ADRs: ASML, TSM, STM, SHOP, MELI, SE, GRAB, BIDU, JD, PDD, AZN, NVO, SNY, GSK, BNTX, TM, HMC, STLA, RACE, NIO, XPEV, LI, ONON, BIRK, GOOS, BUD, BTI, BP, SHEL, SAN, HSBC, RY, TD, BHP, RIO, VALE, SAP, SONY, CNI, CP + all international ETFs); `UNIVERSE` remains combined for backward compat
+- **Portfolio Mode: 📥 Monitor existing positions** — expander at the bottom of Portfolio Mode lists account positions not yet tracked by AutoTrader; *Start monitoring all* attaches a trailing-stop monitor to each without placing any buy orders (useful after app restart)
+- `AutoTrader.attach(symbol, qty, entry_price, config)` — starts monitoring an existing position; skips the entry phase, begins watching from `entry_price`
+- `MultiTrader.attach(...)` — same as above in the multi-position context
+
+---
+
 ## [0.21.0] — 2026-03-30
 
 ### Changed

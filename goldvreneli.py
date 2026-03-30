@@ -18,7 +18,7 @@ from autotrader import (
     StopMode, EntryMode, size_from_risk,
 )
 from replay import ReplayPriceFeed, SyntheticPriceFeed, MockBroker, load_sessions
-from scanner import scan, ScanFilters, UNIVERSE
+from scanner import scan, ScanFilters, UNIVERSE, UNIVERSE_US, UNIVERSE_INTL
 
 # ── Config ────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title=f"Goldvreneli Trading v{__version__}", layout="wide")
@@ -1055,6 +1055,69 @@ if broker == "Alpaca":
                     width="stretch", hide_index=True,
                 )
 
+        # ── Monitor existing account positions ────────────────────────────
+        st.divider()
+        with st.expander("📥 Monitor existing account positions", expanded=False):
+            st.caption(
+                "Attach a trailing-stop monitor to positions already open in your account "
+                "(e.g. after an app restart). No new orders are placed — AutoTrader watches "
+                "from the current price and sells when the trailing stop is hit."
+            )
+            try:
+                acct_positions = trading_client.get_all_positions()
+            except Exception as _e:
+                acct_positions = []
+                st.error(f"Could not fetch positions: {_e}")
+
+            monitored_syms = set(mt.statuses().keys())
+            unmonitored = [p for p in acct_positions if p.symbol not in monitored_syms]
+
+            if not unmonitored:
+                st.info("All open account positions are already being monitored.")
+            else:
+                attach_rows = [{
+                    "Symbol":      p.symbol,
+                    "Qty":         int(float(p.qty)),
+                    "Avg Entry":   f"${float(p.avg_entry_price):.2f}",
+                    "Current":     f"${float(p.current_price):.2f}",
+                    "P&L ($)":     f"${float(p.unrealized_pl):+,.2f}",
+                } for p in unmonitored]
+                st.dataframe(pd.DataFrame(attach_rows), width="stretch", hide_index=True)
+
+                at1, at2, _ = st.columns([1, 1, 2])
+                attach_stop = at1.number_input(
+                    "Trailing stop %", min_value=0.1, max_value=20.0, step=0.1,
+                    value=float(env_get("AT_THRESHOLD", "0.5")),
+                    key="attach_stop",
+                )
+                attach_poll = at2.number_input(
+                    "Poll interval (s)", min_value=1, max_value=60,
+                    value=int(env_get("AT_POLL", "5")),
+                    key="attach_poll",
+                )
+                if st.button("📥 Start monitoring all", key="attach_all"):
+                    attach_cfg = TraderConfig(
+                        stop_value    = float(attach_stop),
+                        poll_interval = float(attach_poll),
+                    )
+                    attach_errors, attach_ok = [], []
+                    for p in unmonitored:
+                        try:
+                            mt.attach(
+                                p.symbol,
+                                int(float(p.qty)),
+                                float(p.avg_entry_price),
+                                config=attach_cfg,
+                            )
+                            attach_ok.append(p.symbol)
+                        except Exception as _e:
+                            attach_errors.append(f"{p.symbol}: {_e}")
+                    if attach_ok:
+                        st.success(f"Monitoring started for: {', '.join(attach_ok)}")
+                    if attach_errors:
+                        st.error("Errors: " + "; ".join(attach_errors))
+                    st.rerun()
+
         # Auto-refresh while running
         if pm_running:
             time.sleep(5)
@@ -1064,7 +1127,8 @@ if broker == "Alpaca":
     elif page == "Scanner":
         st.subheader("🔍 Position Scanner — Start Here")
         st.caption(
-            "Scans ~600 liquid US stocks, ETFs, and ADRs using technical filters and ranks them by performance. "
+            "Scans liquid stocks, ETFs, and ADRs using technical filters and ranks them by performance. "
+            "Choose **🇺🇸 US**, **🌍 International**, or **🌐 All** markets below. "
             "**Run a scan → use ⚡ Quick Invest to open positions in one click, "
             "or send to 📈 Portfolio Mode for fully automated hands-off investing.**"
         )
@@ -1076,26 +1140,55 @@ if broker == "Alpaca":
         as_of_date = col_c.date_input("As-of date", value=datetime.now().date(),
                                        disabled=not use_hist)
 
+        # ── Market selector ────────────────────────────────────────────────────
+        market_choice = st.radio(
+            "Market",
+            ["🇺🇸 US", "🌍 International", "🌐 All"],
+            horizontal=True,
+            index=0,
+            key="scan_market",
+            help="🇺🇸 US: ~500 US equities and ETFs  |  🌍 International: foreign ADRs and country ETFs  |  🌐 All: full combined universe",
+        )
+        if market_choice == "🇺🇸 US":
+            _base_universe = UNIVERSE_US
+        elif market_choice == "🌍 International":
+            _base_universe = UNIVERSE_INTL
+        else:
+            _base_universe = UNIVERSE
+
         # ── Symbol selection ──────────────────────────────────────────────────
         _watchlist_raw = env_get("SCAN_WATCHLIST", "")
         _watchlist = [s.strip().upper() for s in _watchlist_raw.replace(",", " ").split() if s.strip()]
-        _watchlist_valid = [s for s in _watchlist if s in UNIVERSE]
+        _watchlist_valid = [s for s in _watchlist if s in _base_universe]
+        _watchlist_excluded = [s for s in _watchlist if s and s not in _base_universe]
+        if _watchlist_excluded:
+            st.warning(
+                f"Watchlist symbols not in the **{market_choice}** universe (hidden): "
+                f"{', '.join(_watchlist_excluded)}. Switch to 🌐 All or adjust your watchlist."
+            )
+
+        # Reset "scan full universe" checkbox when market changes so stale session
+        # state doesn't leave the multiselect disabled unexpectedly.
+        _prev_market = st.session_state.get("_scan_market_prev")
+        if _prev_market != market_choice:
+            st.session_state["scan_sel_all"] = len(_watchlist_valid) == 0
+            st.session_state["_scan_market_prev"] = market_choice
 
         _default_all = len(_watchlist_valid) == 0
         with st.expander(
-            f"Symbol list — {'full universe' if _default_all else f'{len(_watchlist_valid)} from watchlist'} ({len(UNIVERSE)} available)",
+            f"Symbol list — {'full universe' if _default_all else f'{len(_watchlist_valid)} from watchlist'} ({len(_base_universe)} available)",
             expanded=False,
         ):
             sel_all = st.checkbox("Scan full universe", value=_default_all, key="scan_sel_all")
             selected_syms = st.multiselect(
                 "Symbols to scan",
-                options=sorted(UNIVERSE),
+                options=sorted(_base_universe),
                 default=_watchlist_valid,
                 disabled=sel_all,
                 placeholder="Type to search…",
                 label_visibility="collapsed",
             )
-        scan_symbols = None if sel_all else (selected_syms or None)
+        scan_symbols = list(_base_universe) if sel_all else (selected_syms or None)
 
         # ── Live filter controls ───────────────────────────────────────────────
         with st.expander("Filters", expanded=True):
