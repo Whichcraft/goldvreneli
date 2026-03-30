@@ -290,6 +290,32 @@ do_update() {
 
     CUR_VERSION="$(grep -oP '(?<=__version__ = ")[^"]+' "$INSTALL_DIR/version.py" 2>/dev/null || echo "unknown")"
 
+    # ── Fast path: deploy from local dev tree if it's newer ───────────────
+    # When running the installer from a dev checkout (SCRIPT_DIR != INSTALL_DIR),
+    # skip the GitHub clone if the local version is already ahead.
+    if [[ "$SCRIPT_DIR" != "$INSTALL_DIR" ]]; then
+        DEV_VERSION="$(grep -oP '(?<=__version__ = ")[^"]+' "$SCRIPT_DIR/version.py" 2>/dev/null || echo "unknown")"
+        if [[ "$DEV_VERSION" != "unknown" && "$CUR_VERSION" != "unknown" ]] && \
+           _gw_version_gt "$DEV_VERSION" "$CUR_VERSION"; then
+            info "Local dev tree is v$DEV_VERSION (installed: v$CUR_VERSION) — deploying directly…"
+            mapfile -t PROD_FILES < <(
+                sed -n '/^PROD_FILES=(/,/^)/{/^PROD_FILES=(/d;/^)/d;s/[[:space:]]//g;/^$/d;p}' \
+                    "$SCRIPT_DIR/goldvreneli-install.sh"
+            )
+            deploy_files "$SCRIPT_DIR" "$INSTALL_DIR"
+            patch_env_paths
+            info "Updating Python dependencies…"
+            cd "$INSTALL_DIR"
+            venv/bin/pip install --quiet --upgrade pip
+            venv/bin/pip install --quiet -r requirements.txt
+            echo ""
+            echo -e "${GREEN}Update complete — now at v${DEV_VERSION}.${NC}"
+            echo "  Restart the app: cd $INSTALL_DIR && source venv/bin/activate && streamlit run goldvreneli.py"
+            echo ""
+            return
+        fi
+    fi
+
     # ── Fast path: git pull if install dir is already a repo ──────────────
     if git -C "$INSTALL_DIR" rev-parse --is-inside-work-tree &>/dev/null; then
         info "Installation is a git repo — trying git pull…"
