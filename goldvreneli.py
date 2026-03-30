@@ -20,6 +20,7 @@ from autotrader import (
 )
 from replay import ReplayPriceFeed, SyntheticPriceFeed, MockBroker, load_sessions
 from scanner import scan, ScanFilters, UNIVERSE, UNIVERSE_US, UNIVERSE_INTL, UNIVERSE_INTL_FULL
+from activity_tracker import render_sidebar_log
 
 import pages.settings_page as settings_page
 import pages.help_page as help_page
@@ -101,6 +102,11 @@ with st.sidebar:
 
     st.divider()
     st.caption("Alpaca Paper/Live · IBKR · MIT License")
+
+    # ── Activity Log (shown whenever a MultiTrader session is active) ──────
+    _mt = st.session_state.get("multitrader")
+    if _mt is not None:
+        render_sidebar_log(_mt)
 
 # ── IBKR session helpers (thin wrappers that bind st.session_state) ───────────
 def _get_gateway(ibkr_user, ibkr_pass, trading_mode):

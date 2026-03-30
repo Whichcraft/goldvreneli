@@ -5,6 +5,7 @@ import pandas as pd
 from autotrader import TraderState, TraderConfig, StopMode, EntryMode, size_from_risk
 from replay import load_sessions
 from core import LIVE_FILLS_FILE, env_get
+from activity_tracker import render_log
 
 
 def render(mt, get_price_fn, buy_fn, sell_fn, get_bars_fn, get_equity_fn, broker,
@@ -250,16 +251,7 @@ def render(mt, get_price_fn, buy_fn, sell_fn, get_bars_fn, get_equity_fn, broker
             dl2.metric("Realized P&L today",     f"${mt.realized_losses():+,.2f}")
 
             # Combined log
-            all_logs = mt.all_logs()
-            if all_logs:
-                st.subheader("Activity Log")
-                log_data = [{"Time":   e.timestamp.strftime("%H:%M:%S"),
-                             "Symbol": e.symbol or "—",
-                             "Action": e.action,
-                             "Price":  f"${e.price:.2f}" if e.price else "—",
-                             "Note":   e.note}
-                            for e in reversed(all_logs)]
-                st.dataframe(pd.DataFrame(log_data), width="stretch", hide_index=True)
+            render_log(mt)
 
         # ── Live trade history ────────────────────────────────────────────────
         st.divider()

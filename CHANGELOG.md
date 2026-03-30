@@ -8,6 +8,15 @@ All notable changes to this project will be documented here.
 
 ---
 
+## [0.34.2] — 2026-03-30
+
+### Added
+- Activity Log rendering extracted into new `activity_tracker.py` module with `render_log()` and `render_sidebar_log()` functions; `autotrader_page.py` now calls `render_log(mt)` instead of inlining the table (#19)
+- Activity Log now appears as a persistent collapsible panel in the left sidebar (visible from any page) when a MultiTrader session is active (#21)
+- Scanner now records a scan history (last 10 runs) showing timestamp, market, top-N, result count, skipped count, and key filter settings; shown in an expander below results (#17)
+
+---
+
 ## [0.34.1] — 2026-03-30
 
 ### Fixed

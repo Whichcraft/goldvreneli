@@ -139,6 +139,20 @@ def render(data_client, get_price_fn, buy_fn, sell_fn, mt, use_hist, as_of_date,
         st.session_state.scan_ts = datetime.now()
         progress_bar.empty()
 
+        # Append to scan history
+        history = st.session_state.get("scan_history", [])
+        history.append({
+            "Time":    st.session_state.scan_ts.strftime("%H:%M:%S"),
+            "Market":  market_choice,
+            "Top N":   int(top_n),
+            "Results": len(st.session_state.scan_results),
+            "Skipped": st.session_state.scan_skipped,
+            "RSI":     f"{f_rsi_lo}–{f_rsi_hi}",
+            "MinPx":   f"${f_min_price:.0f}",
+            "VolMult": f"{f_vol_mult:.1f}×",
+        })
+        st.session_state.scan_history = history[-10:]  # keep last 10
+
     results = st.session_state.get("scan_results", pd.DataFrame())
 
     scan_ran = st.session_state.get("scan_ts") is not None
@@ -273,3 +287,9 @@ def render(data_client, get_price_fn, buy_fn, sell_fn, mt, use_hist, as_of_date,
         st.plotly_chart(fig_scan, width="stretch")
     elif not scan_ran:
         st.info("Run a scan to see candidates.")
+
+    # ── Scan history ──────────────────────────────────────────────────────
+    history = st.session_state.get("scan_history", [])
+    if len(history) > 1:
+        with st.expander(f"Scan history ({len(history)} runs this session)", expanded=False):
+            st.dataframe(pd.DataFrame(list(reversed(history))), hide_index=True)

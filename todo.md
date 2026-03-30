@@ -80,19 +80,19 @@ The label "stop floor $" is ambiguous — clarify to "new stop floor $" (or simi
 ### ~~16. Trade history: update on auto-sell~~ ✓ fixed in 0.34.1
 The trade history table doesn't refresh when an AutoTrader sells automatically. Trigger a history update when an auto-sell fires so the table stays current without a manual rerun.
 
-### 17. Scan history window
+### ~~17. Scan history window~~ ✓ fixed in 0.34.2
 Add a scan history view that shows previous scan runs (timestamp, filter settings used, number of results) so users can compare or replay past scans.
 
 ### ~~18. Rename "Realized losses today" → wins framing~~ ✓ fixed in 0.34.0
 "Realized losses today" is discouraging. Rename to something positive, e.g. "Realized P&L today" or "Today's closed trades", so winning days feel rewarding rather than loss-focused.
 
-### 19. Move Activity Log to a dedicated `activity_tracker` module
+### ~~19. Move Activity Log to a dedicated `activity_tracker` module~~ ✓ fixed in 0.34.2
 Extract the activity-log logic (state, append, render) from page files into a new `activity_tracker.py` module to keep pages thin and the tracker reusable.
 
 ### 20. Group Backtest + Test Mode under a "Testing" section in the sidebar
 Move the Backtest page and Paper Trading / Test Mode into a dedicated "Testing" collapsible group in the left sidebar nav, separate from the live-trading pages. Test Mode should let users run AutoTrader logic against live prices without placing real orders (dry-run / paper mode).
 
-### 21. Activity Log: persistent left-sidebar panel
+### ~~21. Activity Log: persistent left-sidebar panel~~ ✓ fixed in 0.34.2
 Surface the Activity Log as a persistent panel in the left sidebar so it's visible from any page, not just when scrolling down the AutoTrader page. Should show the last N entries and auto-refresh.
 
 ### ~~22. Remove default Streamlit page-link nav from top of sidebar~~ ✓ fixed in 0.34.1
