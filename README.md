@@ -1,19 +1,21 @@
 # Goldvreneli Trading Dashboard
 
-![Version](https://img.shields.io/badge/version-0.14.0-blue)
+![Version](https://img.shields.io/badge/version-0.16.0-blue)
 
-A Streamlit-based trading dashboard supporting **Alpaca Paper Trading** and **Interactive Brokers (IBKR)** via IB Gateway, with automated trading and position scanning.
+A Streamlit-based trading dashboard supporting **Alpaca Paper and Live Trading** and **Interactive Brokers (IBKR)** via IB Gateway, with automated trailing-stop trading, technical scanning, portfolio automation, and offline backtesting.
 
 ---
 
 ## Features
 
-- **Alpaca paper trading** — portfolio, positions, candlestick charts, order placement
+- **Alpaca paper and live trading** — toggle between modes in the sidebar; live mode requires confirmation and shows a red warning banner
 - **IBKR live/paper trading** — IB Gateway managed directly from the app (no Docker)
-- **AutoTrader** — trailing-stop position manager: holds as long as price rises, sells when it drops below a configurable threshold
-- **Position Scanner** — scans ~60 liquid US stocks/ETFs with technical filters and proposes the top 10 candidates
-- IB Gateway auto-start via IBC + Xvfb
-- Market and limit orders, cancel all
+- **AutoTrader** — trailing-stop position manager: holds as long as price rises, sells when it drops below a configurable threshold; supports PCT and ATR stops, limit/scale entry, take-profit, breakeven, time stop, and multi-symbol queuing
+- **Portfolio Mode** — fully automated: maintains up to N concurrent positions from scanner picks, each sized at a fixed % of equity; on exit, rescans and opens the next best candidate
+- **Position Scanner** — scans ~600 liquid US stocks, ETFs, and ADRs with technical filters (RSI, SMA, volume, relative strength vs SPY) and proposes top candidates; historical mode supported
+- **Backtest** — replay real Alpaca 1-minute bars or synthetic random-walk data to test AutoTrader settings offline
+- IB Gateway auto-start via IBC + Xvfb (headless, no manual login on startup)
+- Risk-% and dollar-amount position sizing
 - Semantic versioning + changelog
 
 ---
@@ -51,16 +53,26 @@ The installer sets up:
 ./goldvreneli-install.sh --help
 ```
 
+### Updating
+
+```bash
+./goldvreneli-install.sh --update
+```
+
 ---
 
 ## Configuration
 
-Fill in `.env` after install:
+Fill in `.env` after install, or use the **⚙️ Settings** page in the app:
 
 ```env
 # Alpaca Paper Trading
 ALPACA_PAPER_API_KEY=
 ALPACA_PAPER_SECRET_KEY=
+
+# Alpaca Live Trading (required only for live mode)
+ALPACA_LIVE_API_KEY=
+ALPACA_LIVE_SECRET_KEY=
 
 # IBKR
 IBKR_USERNAME=
@@ -69,9 +81,27 @@ IBKR_PASSWORD=
 # Paths (auto-detected by installer)
 IBC_PATH=~/goldvreneli/ibc
 GATEWAY_PATH=~/goldvreneli/Jts/ibgateway
+
+# AutoTrader defaults
+AT_SYMBOL=
+AT_THRESHOLD=0.5
+AT_POLL=5
+AT_DAILY_LOSS_LIMIT=0
+
+# Scanner defaults
+SCAN_TOP_N=10
+SCAN_MIN_PRICE=5.0
+SCAN_MIN_ADV_M=5.0
+SCAN_RSI_LO=35
+SCAN_RSI_HI=72
+SCAN_VOL_MULT=1.0
+SCAN_SMA20_TOL=3.0
+SCAN_MIN_RET5D=-1.0
+SCAN_WATCHLIST=
 ```
 
 Get Alpaca paper API keys at [alpaca.markets](https://alpaca.markets) → Paper Trading → API Keys.
+Get live API keys at alpaca.markets → Live Trading → API Keys (funded account required).
 
 ---
 
@@ -79,80 +109,172 @@ Get Alpaca paper API keys at [alpaca.markets](https://alpaca.markets) → Paper 
 
 ```bash
 source venv/bin/activate
-streamlit run app.py
+streamlit run goldvreneli.py
 ```
 
 Open [http://localhost:8501](http://localhost:8501) in your browser.
 
 ---
 
-## Tabs (Alpaca Mode)
+## Alpaca Paper vs Live
 
-### Portfolio
-- Account overview: portfolio value, cash, buying power, equity
+The sidebar shows an **Alpaca** broker selector with a **Live Trading** toggle.
+
+| Mode | Keys used | Orders |
+|------|-----------|--------|
+| Paper (default) | `ALPACA_PAPER_*` | Simulated — no real money |
+| Live | `ALPACA_LIVE_*` | **Real orders on your funded account** |
+
+Switching to Live requires a confirmation step ("You're going to trade with your real money now!") and displays a persistent red warning banner. If live API keys are not yet configured, an inline credential form appears before proceeding.
+
+---
+
+## Pages (Alpaca Mode)
+
+### 💼 Portfolio
+- Account overview: portfolio value, cash, buying power, equity, day P&L with delta %
 - Open positions table + unrealized P&L bar chart
-- Candlestick price chart (1D / 1W / 1M / 3M)
+- Candlestick price chart (1D / 1W / 1M / 3M) — symbol remembered across page switches
 - Place market or limit orders
 - Open orders table with cancel all
 
-### AutoTrader
-Trailing-stop automated position manager.
+### 🤖 AutoTrader
+
+Trailing-stop automated position manager. Buys on start, tracks peak price, sells when drawdown exceeds threshold.
+
+**Stop modes**
+
+| Mode | Description |
+|------|-------------|
+| PCT | Sell when price drops N% below peak |
+| ATR | Sell when price drops N × ATR(14) below peak |
+
+**Entry modes**
+
+| Mode | Description |
+|------|-------------|
+| Market | Buy immediately at market price |
+| Limit | Place limit order; cancel and re-enter at market after timeout |
+| Scale | Buy in N tranches spaced by interval (dollar-cost average into position) |
+
+**Exit targets**
+
+| Setting | Description |
+|---------|-------------|
+| Take-profit trigger % | Sell a fraction of the position when up this % |
+| Fraction to sell at TP | e.g. 0.5 = sell half, trail the rest |
+| Breakeven trigger % | Once up this %, move stop floor to entry (lock in breakeven) |
+| Time stop (minutes) | Exit after this many minutes regardless of price |
+
+**Qty sizing**
+
+| Mode | Description |
+|------|-------------|
+| Shares | Fixed number of shares |
+| Dollar amount | Converts to shares at current price |
+| Risk % | Sizes so a full stop-out = N% of equity |
+
+**Daily loss limit** — set in Settings; blocks new entries once realized losses reach the threshold.
+
+**Multi-symbol queue** — select multiple Scanner candidates and send them to AutoTrader. Symbols load one at a time; start each to advance the queue.
+
+### 📈 Portfolio Mode
+
+Fully automated multi-position manager. Runs the scanner, opens positions in the top picks, and replaces each position when it closes.
+
+**How it works**
+
+1. On start, scans for candidates and opens up to *target slots* positions simultaneously
+2. Each position is sized at *slot %* of current account equity (default: 10 slots × 10%)
+3. Every position is managed by AutoTrader with the configured trailing stop
+4. When a position closes (stop triggered), the next scanner pick is opened automatically
+5. If no qualifying candidates exist, the slot stays empty until the next rescan
+
+**Configuration**
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| Symbol | AAPL | Stock to trade |
-| Qty | 1 | Number of shares |
-| Trailing Stop % | 0.5% | Sell when price drops this % below peak |
-| Poll interval | 5s | Price check frequency |
+| Target slots | 10 | Maximum simultaneous positions |
+| % of equity per slot | 10% | Position size as fraction of equity |
+| Stop mode | PCT | PCT or ATR trailing stop |
+| Trailing stop value | 0.5% | % drop from peak (PCT) or ATR multiplier |
+| Poll interval | 5s | How often each position checks the price |
+| Daily loss limit | off | Halts new entries after this cumulative loss |
 
-- Buys on start, tracks peak price in real time
-- Sells automatically when drawdown ≥ threshold
-- Live status: entry, peak, current price, drawdown progress bar, P&L
-- Full activity log (BUY / PEAK / SELL / STOP / ERROR)
+**Candidate list** — scanned fresh at startup and refreshed automatically if more than 30 minutes old. Already-active symbols are skipped when picking the next candidate.
 
-### Scanner
-Scans ~60 liquid US stocks and ETFs. Filters applied:
+### 🔍 Scanner
 
-| Filter | Condition |
-|--------|-----------|
-| Trend | Price > SMA20 and SMA50 |
-| RSI(14) | 40–65 |
-| Volume | > 1.5× 20-day average |
-| Liquidity | Price > $5, ADV > $5M |
-| Momentum | 5-day return > 0% |
+Scans ~600 liquid US stocks, ETFs, and ADRs using daily Alpaca bars and pandas-ta indicators.
 
-Returns top N candidates ranked by composite score with a 5-day return bar chart.
+**Hard filters** (all must pass)
+
+| Filter | Default | Meaning |
+|--------|---------|---------|
+| Min price | $5 | Excludes penny stocks |
+| Min ADV | $5M/day | Minimum average daily dollar volume |
+| RSI(14) | 35–72 | Avoids overbought and deeply oversold |
+| Volume | ≥ 1× 20-day avg | Requires above-average volume |
+| SMA20 tolerance | 3% | Price may be up to 3% below SMA20 |
+| Min 5d return | −1% | Filters out stocks in sharp downtrend |
+| Above SMA50 | required | Intermediate-term uptrend required |
+
+**Scoring** — composite rank across:
+- Relative strength vs SPY (weight 3×, dominant factor)
+- 1-day, 5-day, 10-day, 20-day returns
+- SMA20 slope
+- ATR% penalty (discounts high-volatility names)
+
+**Historical mode** — tick "Historical date" to scan as of a past date using data up to that close.
+
+**Symbol list** — expand to choose specific symbols or scan the full ~600-symbol universe. Pre-populated from your watchlist in Settings.
+
+**Stale warning** — if results are more than 30 minutes old, a warning appears.
+
+**Sending to AutoTrader** — select rows in the results table (multi-row), click *Send N symbol(s) to AutoTrader*. Symbols are queued.
+
+### 🧪 Backtest
+
+Test AutoTrader logic offline — no real orders placed.
+
+**Replay feed** — fetches real Alpaca 1-minute bars for a symbol and date, plays them back at configurable speed. Supports full day, duration (start time + N hours), or custom time range (ET).
+
+**Synthetic feed** — geometric random walk. Configurable start price, volatility, drift, and random seed for reproducibility.
+
+After the run:
+- Live status shows state, entry/current/peak/stop prices, P&L, drawdown bar, replay progress
+- Post-run summary shows final P&L (green/red) and fill counts
+- Session history table shows all past runs; expand any session to see individual fills
+
+### ⚙️ Settings
+
+All settings saved to `.env` and persist across restarts. See configuration section above for all keys.
 
 ---
 
 ## IBKR Setup
 
-1. Select **IBKR** in the sidebar and enter credentials
+1. Select **IBKR** in the sidebar and enter credentials in **⚙️ Settings**
 2. Click **Start Gateway** — launches headlessly via IBC + Xvfb (30–90s startup)
-3. Click **Connect** once the API port is open
-4. Use port `4002` for paper, `4001` for live
+3. Click **Connect** once the API port shows as *Open*
 
-### Ports
+**Ports**
 
-| Mode  | App        | Port |
-|-------|------------|------|
-| Paper | IB Gateway | 4002 |
-| Paper | TWS        | 7497 |
-| Live  | IB Gateway | 4001 |
-| Live  | TWS        | 7496 |
+| Mode  | Port |
+|-------|------|
+| Paper | 4002 |
+| Live  | 4001 |
 
-### Two-Factor Authentication
-
-IBC supports IBKR Mobile soft token (push notification — approve once at startup). Hardware tokens require one manual login per day at `AUTO_RESTART_TIME` (default: 11:59 PM).
+**Authentication** — IBC supports IBKR Mobile push notifications (approve once at startup). Hardware tokens require one manual login per day.
 
 ---
 
 ## Versioning
 
 ```bash
-./bump.sh patch   # 0.3.0 → 0.3.1
-./bump.sh minor   # 0.3.0 → 0.4.0
-./bump.sh major   # 0.3.0 → 1.0.0
+./bump.sh patch   # 0.15.0 → 0.15.1
+./bump.sh minor   # 0.15.0 → 0.16.0
+./bump.sh major   # 0.15.0 → 1.0.0
 git push && git push --tags
 ```
 
@@ -162,16 +284,19 @@ git push && git push --tags
 
 ```
 goldvreneli/
-├── app.py              # Streamlit dashboard (Portfolio, AutoTrader, Scanner)
-├── autotrader.py       # Trailing-stop AutoTrader logic
-├── scanner.py          # Technical position scanner
-├── gateway_manager.py  # IB Gateway lifecycle (IBC + Xvfb)
-├── version.py          # Single version source of truth
-├── bump.sh             # Version bump script
-├── goldvreneli-install.sh          # One-command installer
-├── requirements.txt    # Python dependencies
-├── .env                # Credentials (gitignored)
-└── venv/               # Python virtual environment (gitignored)
+├── goldvreneli.py          # Streamlit UI (all pages)
+├── core.py                 # Framework-agnostic core: credentials, client cache, session factories
+├── autotrader.py           # AutoTrader + MultiTrader logic
+├── portfolio.py            # PortfolioManager: automated multi-position manager
+├── scanner.py              # Technical position scanner
+├── replay.py               # ReplayPriceFeed, SyntheticPriceFeed, MockBroker
+├── gateway_manager.py      # IB Gateway lifecycle (IBC + Xvfb)
+├── version.py              # Single version source of truth
+├── bump.sh                 # Version bump script
+├── goldvreneli-install.sh  # One-command installer + updater
+├── requirements.txt        # Python dependencies
+├── .env                    # Credentials (gitignored)
+└── venv/                   # Python virtual environment (gitignored)
 ```
 
 ---

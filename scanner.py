@@ -43,6 +43,16 @@ class ScanFilters:
     sma20_tol_pct:  float = 3.0    # allow price up to this % below SMA20
     min_ret_5d:     float = -1.0   # minimum 5-day return (%)
 
+    def __post_init__(self):
+        if self.rsi_lo >= self.rsi_hi:
+            raise ValueError(f"rsi_lo ({self.rsi_lo}) must be less than rsi_hi ({self.rsi_hi})")
+        if self.min_price < 0:
+            raise ValueError("min_price must be non-negative")
+        if self.min_adv_m < 0:
+            raise ValueError("min_adv_m must be non-negative")
+        if self.vol_mult < 0:
+            raise ValueError("vol_mult must be non-negative")
+
 # Liquid universe — large/mid-cap US equities, ETFs, and ADRs (~600 symbols)
 UNIVERSE = [
     # Mega-cap tech
@@ -220,12 +230,14 @@ def score_symbol(bars: pd.DataFrame,
     # ── Indicators ────────────────────────────────────────────────────────────
     sma20     = ta.sma(close, length=20).iloc[-1]
     sma50     = ta.sma(close, length=50).iloc[-1]
-    sma20_prev = ta.sma(close, length=20).iloc[-6]   # slope check
+    sma20_series = ta.sma(close, length=20)
+    sma20_prev = sma20_series.iloc[-6] if len(sma20_series) >= 6 else sma20
     rsi       = ta.rsi(close, length=14).iloc[-1]
     avg_vol20 = volume.rolling(20).mean().iloc[-1]
     atr       = ta.atr(high, low, close, length=14).iloc[-1]
     macd_df   = ta.macd(close)
-    macd_hist = macd_df["MACDh_12_26_9"].iloc[-1] if macd_df is not None else 0
+    macd_col  = next((c for c in (macd_df.columns if macd_df is not None else []) if c.startswith("MACDh")), None)
+    macd_hist = macd_df[macd_col].iloc[-1] if macd_col else 0
 
     last_price = close.iloc[-1]
     ret_1d  = (last_price / close.iloc[-2]  - 1) * 100 if len(close) > 2  else 0

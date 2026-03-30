@@ -15,8 +15,10 @@ GATEWAY_URL="https://download2.interactivebrokers.com/installers/ibgateway/stabl
 
 # Production files only — no dev files deployed
 PROD_FILES=(
-    app.py
+    goldvreneli.py
+    core.py
     autotrader.py
+    portfolio.py
     scanner.py
     replay.py
     gateway_manager.py
@@ -287,7 +289,7 @@ do_update() {
             ls "$GATEWAY_DIR"/*/ibgateway &>/dev/null 2>&1 && { info "Checking for IB Gateway updates…"; install_ib_gateway; } || true
             echo ""
             echo -e "${GREEN}Update complete — now at v${NEW_VERSION}.${NC}"
-            echo "  Restart the app: cd $INSTALL_DIR && source venv/bin/activate && streamlit run app.py"
+            echo "  Restart the app: cd $INSTALL_DIR && source venv/bin/activate && streamlit run goldvreneli.py"
             echo ""
             return
         else
@@ -334,7 +336,7 @@ do_update() {
 
     echo ""
     echo -e "${GREEN}Update complete — now at v${NEW_VERSION}.${NC}"
-    echo "  Restart the app: cd $INSTALL_DIR && source venv/bin/activate && streamlit run app.py"
+    echo "  Restart the app: cd $INSTALL_DIR && source venv/bin/activate && streamlit run goldvreneli.py"
     echo ""
 }
 
@@ -379,7 +381,7 @@ print_summary() {
     echo "  2. Launch the dashboard:"
     echo "       cd $INSTALL_DIR"
     echo "       source venv/bin/activate"
-    echo "       streamlit run app.py"
+    echo "       streamlit run goldvreneli.py"
     echo ""
     echo "  3. To update later:"
     echo "       $INSTALL_DIR/goldvreneli-install.sh --update"
@@ -489,5 +491,5 @@ if [[ ! "$want_launch" =~ ^[Nn]$ ]]; then
     # Open browser after a short delay to let Streamlit start
     (sleep 3 && xdg-open "http://localhost:8501" 2>/dev/null || true) &
     source venv/bin/activate
-    streamlit run app.py
+    streamlit run goldvreneli.py
 fi

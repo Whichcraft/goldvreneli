@@ -1,13 +1,17 @@
-import os
 import time
 import streamlit as st
 import plotly.graph_objects as go
 import pandas as pd
-from dotenv import load_dotenv, dotenv_values, set_key
-
-load_dotenv()
 
 from version import __version__
+from core import (
+    INSTALL_DIR, ENV_FILE,
+    env_get, env_save,
+    get_alpaca_clients, clear_alpaca_cache,
+    get_gateway, get_ib,
+    get_multi_trader,
+    get_portfolio_manager,
+)
 from autotrader import (
     AutoTrader, MultiTrader, TraderConfig, TraderState,
     StopMode, EntryMode, size_from_risk,
@@ -15,31 +19,23 @@ from autotrader import (
 from replay import ReplayPriceFeed, SyntheticPriceFeed, MockBroker, load_sessions
 from scanner import scan, ScanFilters, UNIVERSE
 
-INSTALL_DIR = os.path.dirname(os.path.abspath(__file__))
-ENV_FILE    = os.path.join(INSTALL_DIR, ".env")
-
 # ── Config ────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title=f"Goldvreneli Trading v{__version__}", layout="wide")
-
-# ── .env helpers ──────────────────────────────────────────────────────────────
-def env_get(key: str, default: str = "") -> str:
-    return os.environ.get(key, dotenv_values(ENV_FILE).get(key, default))
-
-def env_save(values: dict):
-    """Write multiple key=value pairs to .env and reload into os.environ."""
-    if not os.path.exists(ENV_FILE):
-        open(ENV_FILE, "w").close()
-    for k, v in values.items():
-        set_key(ENV_FILE, k, v)
-        os.environ[k] = v
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown(f"## Goldvreneli `v{__version__}`")
     st.divider()
 
-    broker = st.radio("Broker", ["Alpaca (Paper)", "IBKR"],
+    broker = st.radio("Broker", ["Alpaca", "IBKR"],
                       horizontal=True, label_visibility="collapsed")
+
+    if broker == "Alpaca":
+        alpaca_is_live = st.toggle("Live Trading", key="alpaca_live")
+        if alpaca_is_live:
+            st.markdown(":red[**⚠️ LIVE — real money**]")
+    else:
+        alpaca_is_live = False
 
     st.divider()
 
@@ -47,12 +43,12 @@ with st.sidebar:
     if "nav_page" in st.session_state:
         st.session_state["nav_radio"] = st.session_state.pop("nav_page")
 
-    if broker == "Alpaca (Paper)":
-        pages = ["Portfolio", "AutoTrader", "Scanner", "Backtest", "Settings"]
-        icons = ["💼", "🤖", "🔍", "🧪", "⚙️"]
+    if broker == "Alpaca":
+        pages = ["Portfolio", "AutoTrader", "Portfolio Mode", "Scanner", "Backtest", "Settings", "Help"]
+        icons = ["💼", "🤖", "📈", "🔍", "🧪", "⚙️", "❓"]
     else:
-        pages = ["Portfolio", "Settings"]
-        icons = ["💼", "⚙️"]
+        pages = ["Portfolio", "Settings", "Help"]
+        icons = ["💼", "⚙️", "❓"]
 
     page = st.radio(
         "Page",
@@ -63,33 +59,14 @@ with st.sidebar:
     )
 
     st.divider()
-    st.caption("Alpaca Paper · IBKR · MIT License")
+    st.caption("Alpaca Paper/Live · IBKR · MIT License")
 
-# ── Alpaca helpers ────────────────────────────────────────────────────────────
-@st.cache_resource
-def get_alpaca_clients(api_key, secret_key):
-    from alpaca.trading.client import TradingClient
-    from alpaca.data.historical import StockHistoricalDataClient
-    trading = TradingClient(api_key=api_key, secret_key=secret_key, paper=True)
-    data    = StockHistoricalDataClient(api_key=api_key, secret_key=secret_key)
-    return trading, data
+# ── IBKR session helpers (thin wrappers that bind st.session_state) ───────────
+def _get_gateway(ibkr_user, ibkr_pass, trading_mode):
+    return get_gateway(st.session_state, ibkr_user, ibkr_pass, trading_mode)
 
-# ── IBKR helpers ──────────────────────────────────────────────────────────────
-def get_gateway(ibkr_user, ibkr_pass, trading_mode):
-    if "gateway" not in st.session_state:
-        from gateway_manager import GatewayManager
-        st.session_state.gateway = GatewayManager(
-            username=ibkr_user,
-            password=ibkr_pass,
-            trading_mode=trading_mode,
-        )
-    return st.session_state.gateway
-
-def get_ib():
-    if "ib" not in st.session_state or not st.session_state.ib.isConnected():
-        from ib_async import IB
-        st.session_state.ib = IB()
-    return st.session_state.ib
+def _get_ib():
+    return get_ib(st.session_state)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SETTINGS PAGE (shared by both brokers)
@@ -99,11 +76,18 @@ if page == "Settings":
 
     with st.form("settings_form"):
 
-        # ── Alpaca ────────────────────────────────────────────────────────────
+        # ── Alpaca Paper ──────────────────────────────────────────────────────
         st.subheader("Alpaca Paper Trading")
         c1, c2 = st.columns(2)
         f_alpaca_key    = c1.text_input("API Key",    value=env_get("ALPACA_PAPER_API_KEY"),    type="password")
         f_alpaca_secret = c2.text_input("Secret Key", value=env_get("ALPACA_PAPER_SECRET_KEY"), type="password")
+
+        # ── Alpaca Live ───────────────────────────────────────────────────────
+        st.subheader("Alpaca Live Trading")
+        st.caption("Get live API keys at alpaca.markets → Live Trading → API Keys.")
+        lc1, lc2 = st.columns(2)
+        f_alpaca_live_key    = lc1.text_input("Live API Key",    value=env_get("ALPACA_LIVE_API_KEY"),    type="password")
+        f_alpaca_live_secret = lc2.text_input("Live Secret Key", value=env_get("ALPACA_LIVE_SECRET_KEY"), type="password")
 
         st.divider()
 
@@ -169,6 +153,8 @@ if page == "Settings":
         env_save({
             "ALPACA_PAPER_API_KEY":    f_alpaca_key,
             "ALPACA_PAPER_SECRET_KEY": f_alpaca_secret,
+            "ALPACA_LIVE_API_KEY":     f_alpaca_live_key,
+            "ALPACA_LIVE_SECRET_KEY":  f_alpaca_live_secret,
             "IBKR_USERNAME":           f_ibkr_user,
             "IBKR_PASSWORD":           f_ibkr_pass,
             "IBKR_MODE":               f_ibkr_mode,
@@ -189,7 +175,7 @@ if page == "Settings":
             "SCAN_WATCHLIST":          f_scan_watchlist,
         })
         # Clear cached clients so they reconnect with new keys
-        get_alpaca_clients.clear()
+        clear_alpaca_cache()
         # Reset IBKR auto-start flags so gateway restarts with new credentials
         st.session_state.pop("gw_start_attempted", None)
         st.session_state.pop("ib_connect_attempted", None)
@@ -201,39 +187,261 @@ if page == "Settings":
     st.stop()
 
 # ══════════════════════════════════════════════════════════════════════════════
+# HELP PAGE (shared by both brokers)
+# ══════════════════════════════════════════════════════════════════════════════
+if page == "Help":
+    st.title("Help & Documentation")
+
+    with st.expander("Quick Start", expanded=True):
+        st.markdown("""
+1. Go to **⚙️ Settings** and enter your Alpaca paper API keys (free at [alpaca.markets](https://alpaca.markets)).
+2. Select **Alpaca (Paper)** in the sidebar.
+3. Use **💼 Portfolio** to view positions and place manual orders.
+4. Use **🔍 Scanner** to find candidates, then send them to **🤖 AutoTrader**.
+5. Use **🧪 Backtest** to test AutoTrader logic on historical data without risking money.
+""")
+
+    with st.expander("💼 Portfolio"):
+        st.markdown("""
+**Account metrics** — Portfolio value, cash, buying power, equity, and day P&L (with % delta).
+
+**Open positions** — table of current holdings with avg entry, current price, market value, unrealized P&L in dollars and percent.
+
+**Price chart** — candlestick chart for any symbol over 1D / 1W / 1M / 3M. The symbol you type is remembered across page switches.
+
+**Place order** — market or limit orders. Symbol is validated before submit.
+
+**Open orders** — lists pending orders with fill status. "Cancel All" cancels everything in one click.
+""")
+
+    with st.expander("🤖 AutoTrader"):
+        st.markdown("""
+AutoTrader buys on start and manages the position using a trailing stop.
+
+**Symbol & qty**
+
+| Field | Description |
+|-------|-------------|
+| Symbol | Ticker to trade (blank = use Settings default) |
+| Qty mode | **Shares** — fixed share count; **Dollar amount** — converts to shares at current price; **Risk %** — sizes position so a full-stop loss equals N% of equity |
+| Stop mode | **PCT** — trailing stop as % below peak; **ATR** — trailing stop as a multiple of the 14-day ATR |
+| Stop value | PCT: e.g. `0.5` = sell when price drops 0.5% from peak. ATR: e.g. `2.0` = 2× ATR. |
+| Poll interval | Seconds between price checks (default 5s) |
+
+**Entry modes** (expand *Entry mode*)
+
+| Mode | Behaviour |
+|------|-----------|
+| Market | Buy immediately at market |
+| Limit | Place limit order; cancel and fall back to market after timeout |
+| Scale | Buy in N tranches, spaced by interval (dollar-cost averaging into a position) |
+
+**Exit targets** (expand *Exit targets*)
+
+| Setting | Description |
+|---------|-------------|
+| Take-profit trigger % | When up this %, sell the configured fraction. 0 = disabled. |
+| Fraction to sell | Portion to sell at take-profit (e.g. 0.5 = sell half, trail the rest) |
+| Breakeven trigger % | Once up this %, move stop floor to entry price (lock in breakeven). 0 = disabled. |
+| Time stop (minutes) | Exit after this many minutes regardless of price. 0 = disabled. |
+
+**Multi-symbol queue** — send multiple symbols from Scanner; they load one at a time. After starting each, the next symbol pre-fills the form automatically.
+
+**Positions table** — shows all active/completed positions with state, prices, drawdown, P&L.
+
+**Daily summary** — unrealized P&L across all watching positions, plus cumulative realized losses (used to enforce the daily loss limit).
+""")
+
+    with st.expander("🔍 Scanner"):
+        st.markdown("""
+Scans ~600 liquid US stocks, ETFs, and ADRs using daily bar data and technical indicators.
+
+**Controls**
+
+| Control | Description |
+|---------|-------------|
+| Top N | Number of candidates to return |
+| Historical date | Tick to scan as of a past date (uses closing data up to that date) |
+| Symbol list | Expand to choose individual symbols or scan the full universe. Pre-populated from your watchlist in Settings. |
+
+**Hard filters** (candidates must pass all of these)
+
+| Filter | Default | Meaning |
+|--------|---------|---------|
+| Min price | $5 | Excludes penny stocks |
+| Min ADV | $5M/day | Minimum daily dollar volume |
+| RSI(14) | 35–72 | Avoids overbought and deeply oversold |
+| Volume | ≥ 1× 20-day avg | Requires above-average volume |
+| SMA20 tolerance | 3% | Price may be up to 3% below SMA20 |
+| Min 5d return | −1% | Filters out stocks in sharp downtrends |
+| Above SMA50 | required | Intermediate-term trend filter |
+
+**Scoring** — candidates are ranked by a composite score:
+
+- Relative strength vs SPY (weight 3×) — most important signal
+- 1-day, 5-day, 10-day, 20-day returns
+- SMA20 slope (upward momentum)
+- ATR% penalty (discounts high-volatility names)
+
+**Sending to AutoTrader** — select one or more rows in the results table, then click *Send N symbol(s) to AutoTrader*. Symbols are queued; configure and start each in turn.
+
+_Adjust filter thresholds in **⚙️ Settings → Scanner Filters**._
+""")
+
+    with st.expander("🧪 Backtest"):
+        st.markdown("""
+Run AutoTrader logic on historical or simulated data — no real orders are placed.
+
+**Replay feed** — fetches real Alpaca 1-minute bars for the chosen symbol and date, replays them at configurable speed. Use the time-window controls to test a specific part of the trading day.
+
+| Setting | Description |
+|---------|-------------|
+| Symbol | Ticker to replay (defaults to AT_SYMBOL from Settings) |
+| Date | Trading day to replay (defaults to most recent weekday) |
+| Speed | 200 = 200× real time. Poll interval is set automatically. |
+| Full day | Replay the entire trading session |
+| Duration | Start at a time, replay for N hours |
+| Custom range | Specify exact start and end time (ET) |
+
+**Synthetic feed** — generates a geometric random walk; useful for testing stop logic in arbitrary market conditions.
+
+| Setting | Description |
+|---------|-------------|
+| Start price | Initial price in dollars |
+| Volatility % / step | Standard deviation per bar (0.5 = calm, 1.5 = volatile) |
+| Drift % / step | Positive = upward bias, negative = downward |
+| Fix random seed | Makes runs reproducible |
+
+**Session history** — every run is saved to the fills log (JSON). The history table shows all past sessions with symbol, feed type, buy/sell count, and final P&L. Expand any session to see individual fills.
+
+**Post-run summary** — when the trader finishes (SOLD or STOPPED), a summary box shows final P&L and fill counts immediately.
+""")
+
+    with st.expander("⚙️ Settings"):
+        st.markdown("""
+All settings are saved to `.env` in the install directory and persist across restarts.
+
+**Alpaca** — API key and secret for paper trading. Get them at alpaca.markets → Paper Trading → API Keys.
+
+**IBKR** — username, password, trading mode (paper/live), and paths to IBC and IB Gateway. These are auto-detected by the installer; only change them if you installed to a custom location.
+
+**AutoTrader Defaults** — pre-fill values for the AutoTrader form.
+
+| Setting | Description |
+|---------|-------------|
+| Default Symbol | Pre-fills the symbol field |
+| Trailing Stop % | Default PCT stop value |
+| Poll Interval | Default price-check frequency |
+| Daily Loss Limit | Halt new trades when realized losses reach this amount. 0 = disabled. |
+
+**Scanner Filters** — defaults for all hard-filter thresholds. Override per-run using the controls on the Scanner page.
+
+**Watchlist** — comma-separated symbols pre-selected in the Scanner symbol list. Leave blank to start with the full universe.
+""")
+
+    with st.expander("IBKR Setup"):
+        st.markdown("""
+1. Select **IBKR** in the sidebar and enter credentials in **⚙️ Settings**.
+2. On the Portfolio page, click **Start Gateway** — IB Gateway launches headlessly via IBC + Xvfb (30–90s startup time).
+3. Click **Connect** once the API port shows as *Open*.
+4. Use port `4002` for paper trading, `4001` for live.
+
+**Authentication** — IBC supports IBKR Mobile push notifications (approve once at startup). Hardware tokens require one manual login per day.
+
+**Gateway status panel** — shows process state, API port, and IB session status. Use Stop Gateway / Disconnect to cleanly shut down.
+""")
+
+    with st.expander("Tips"):
+        st.markdown("""
+- **Scanner → AutoTrader workflow**: Run Scanner, select top candidates in the table (multi-row), click *Send to AutoTrader*. Configure stop/qty for the first symbol and start; the next symbol pre-fills automatically.
+- **Backtest before live**: Use Backtest with Replay feed on a recent date to validate your stop settings before using AutoTrader during market hours.
+- **Risk % sizing**: Set qty mode to *Risk %* so that a full stop-out always costs the same fraction of your equity, regardless of the stock's price or volatility.
+- **Breakeven + take-profit together**: Set take-profit to sell half at +1%, and breakeven at +0.5%. You lock in profit on half the position and can never lose money on the other half.
+- **Stale scan warning**: If scan results are more than 30 minutes old, a warning appears. Re-run the scan before sending symbols to AutoTrader.
+- **Daily loss limit**: Set a dollar amount in Settings to automatically block new AutoTrader entries after you've lost that much in realized P&L for the day.
+""")
+
+    st.stop()
+
+# ══════════════════════════════════════════════════════════════════════════════
 # ALPACA DASHBOARD
 # ══════════════════════════════════════════════════════════════════════════════
-if broker == "Alpaca (Paper)":
+if broker == "Alpaca":
     from alpaca.trading.requests import MarketOrderRequest, LimitOrderRequest, GetOrdersRequest
     from alpaca.trading.enums import OrderSide, TimeInForce, QueryOrderStatus
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame
     from datetime import datetime, timedelta, time as dtime
 
-    api_key    = env_get("ALPACA_PAPER_API_KEY")
-    secret_key = env_get("ALPACA_PAPER_SECRET_KEY")
+    # ── Live mode confirmation guard ──────────────────────────────────────────
+    if not alpaca_is_live:
+        st.session_state.pop("live_confirmed", None)
 
-    if not api_key or not secret_key:
-        st.warning("API keys not configured. Go to **Settings** to add them.")
+    if alpaca_is_live and not st.session_state.get("live_confirmed"):
+        st.warning(
+            "⚠️ **You're going to trade with your real money now!**\n\n"
+            "Live orders will be placed on your real Alpaca account. "
+            "This is not a simulation."
+        )
+        c1, c2 = st.columns([1, 1])
+        if c1.button("I understand — switch to Live", type="primary"):
+            st.session_state["live_confirmed"] = True
+            st.rerun()
+        if c2.button("Cancel — stay on Paper"):
+            st.session_state["alpaca_live"] = False
+            st.rerun()
         st.stop()
 
+    if alpaca_is_live:
+        api_key    = env_get("ALPACA_LIVE_API_KEY")
+        secret_key = env_get("ALPACA_LIVE_SECRET_KEY")
+        if not api_key or not secret_key:
+            st.error("⚠️ Live trading API keys not configured.")
+            st.markdown("Enter your **live** Alpaca API keys below, or go to **Settings**.")
+            with st.form("live_creds_quick"):
+                lc1, lc2 = st.columns(2)
+                q_key    = lc1.text_input("Live API Key",    type="password")
+                q_secret = lc2.text_input("Live Secret Key", type="password")
+                if st.form_submit_button("Save & Connect", type="primary"):
+                    if q_key and q_secret:
+                        env_save({"ALPACA_LIVE_API_KEY": q_key, "ALPACA_LIVE_SECRET_KEY": q_secret})
+                        clear_alpaca_cache()
+                        st.rerun()
+                    else:
+                        st.error("Both fields are required.")
+            st.stop()
+    else:
+        api_key    = env_get("ALPACA_PAPER_API_KEY")
+        secret_key = env_get("ALPACA_PAPER_SECRET_KEY")
+        if not api_key or not secret_key:
+            st.warning("Paper trading API keys not configured. Go to **Settings** to add them.")
+            st.stop()
+
     try:
-        trading_client, data_client = get_alpaca_clients(api_key, secret_key)
+        trading_client, data_client = get_alpaca_clients(api_key, secret_key, paper=not alpaca_is_live)
     except Exception as e:
         st.error(f"Alpaca connection failed: {e}")
         st.stop()
 
     account = trading_client.get_account()
 
-    st.title("Portfolio Dashboard (Alpaca Paper)")
+    _mode_label = "Live" if alpaca_is_live else "Paper"
+    if alpaca_is_live:
+        st.error(f"⚠️ LIVE TRADING MODE — real money at risk")
+    st.title(f"Portfolio Dashboard (Alpaca {_mode_label})")
 
     # ── Page: Portfolio ───────────────────────────────────────────────────────
     if page == "Portfolio":
-        col1, col2, col3, col4 = st.columns(4)
+        day_pl     = float(account.equity) - float(account.last_equity)
+        day_pl_pct = (day_pl / float(account.last_equity) * 100) if float(account.last_equity) else 0.0
+        col1, col2, col3, col4, col5 = st.columns(5)
         col1.metric("Portfolio Value", f"${float(account.portfolio_value):,.2f}")
         col2.metric("Cash",            f"${float(account.cash):,.2f}")
         col3.metric("Buying Power",    f"${float(account.buying_power):,.2f}")
         col4.metric("Equity",          f"${float(account.equity):,.2f}")
+        col5.metric("Day P&L",         f"${day_pl:+,.2f}",
+                    delta=f"{day_pl_pct:+.2f}%",
+                    delta_color="normal")
 
         st.divider()
 
@@ -267,7 +475,9 @@ if broker == "Alpaca (Paper)":
         st.divider()
 
         st.subheader("Price Chart")
-        chart_symbol  = st.text_input("Symbol", value="AAPL").upper()
+        chart_symbol  = st.text_input("Symbol",
+                                       value=st.session_state.get("_chart_sym", "AAPL")).upper()
+        st.session_state["_chart_sym"] = chart_symbol
         timeframe_opt = st.selectbox("Timeframe", ["1D", "1W", "1M", "3M"], index=2)
         tf_map   = {"1D": (1,  TimeFrame.Hour), "1W": (7,  TimeFrame.Hour),
                     "1M": (30, TimeFrame.Day),  "3M": (90, TimeFrame.Day)}
@@ -300,12 +510,15 @@ if broker == "Alpaca (Paper)":
             sym        = c1.text_input("Symbol", value="AAPL").upper()
             side       = c2.selectbox("Side", ["BUY", "SELL"])
             order_type = c3.selectbox("Type", ["Market", "Limit"])
-            qty        = c4.number_input("Qty", min_value=0.0, value=1.0, step=1.0)
+            qty        = c4.number_input("Qty", min_value=1.0, value=1.0, step=1.0)
             limit_px   = c5.number_input("Limit Price", min_value=0.0, value=0.0, step=0.01,
                                           disabled=(order_type == "Market"))
             submitted  = st.form_submit_button("Submit Order", type="primary")
 
         if submitted:
+            if not sym:
+                st.error("Symbol must not be empty.")
+                st.stop()
             try:
                 order_side = OrderSide.BUY if side == "BUY" else OrderSide.SELL
                 if order_type == "Market":
@@ -375,47 +588,60 @@ if broker == "Alpaca (Paper)":
         if "autotrader" in st.session_state and "multitrader" not in st.session_state:
             del st.session_state["autotrader"]
 
-        if "multitrader" not in st.session_state:
-            st.session_state.multitrader = MultiTrader(
-                get_price        = alpaca_get_price,
-                place_buy        = alpaca_buy,
-                place_sell       = alpaca_sell,
-                get_bars         = alpaca_get_bars,
-                daily_loss_limit = float(env_get("AT_DAILY_LOSS_LIMIT", "0")),
-            )
-        mt = st.session_state.multitrader
+        mt = get_multi_trader(st.session_state,
+                              alpaca_get_price, alpaca_buy, alpaca_sell, alpaca_get_bars)
 
         # ── New position form ─────────────────────────────────────────────
+        # Handle multi-symbol prefill from Scanner
+        _prefill_list = st.session_state.pop("at_prefill_list", None)
+        _prefill_single = st.session_state.pop("at_prefill", None)
+        if _prefill_list:
+            _default_symbol = _prefill_list[0]
+            _queued = _prefill_list[1:]
+            if _queued:
+                st.session_state["at_queue"] = _queued
+        else:
+            _default_symbol = _prefill_single or env_get("AT_SYMBOL", "")
+
         with st.form("at_config"):
             st.markdown("**New Position**")
             c1, c2, c3 = st.columns(3)
-            at_symbol   = c1.text_input(
-                "Symbol",
-                value=st.session_state.pop("at_prefill", env_get("AT_SYMBOL", "")),
-            ).upper()
+            at_symbol   = c1.text_input("Symbol", value=_default_symbol).upper()
             at_stop_mode = c2.selectbox("Stop Mode", ["PCT", "ATR"],
                                         help="PCT = fixed %; ATR = N × ATR(14) dollars")
             at_stop_val  = c3.number_input(
-                "Trailing Stop % " if True else "ATR Multiplier",
+                "Trailing Stop %",
                 min_value=0.1, max_value=20.0,
                 value=float(env_get("AT_THRESHOLD", "0.5")), step=0.1,
                 help="For PCT: % drop from peak triggers sell. For ATR: multiplier × ATR(14).",
             )
 
-            # Risk-based sizing
-            use_risk_sizing = st.checkbox("Size position by risk %", value=False)
-            if use_risk_sizing:
+            # Qty sizing mode
+            qty_mode = st.radio("Qty mode", ["Shares", "Dollar amount", "Risk %"],
+                                horizontal=True, label_visibility="collapsed")
+            if qty_mode == "Shares":
+                at_qty = st.number_input("Qty (shares)", min_value=1, value=1, step=1)
+            elif qty_mode == "Dollar amount":
+                qc1, qc2 = st.columns(2)
+                at_dollar_amt  = qc1.number_input("$ amount to invest", min_value=1.0,
+                                                   value=1000.0, step=100.0)
+                at_price_est   = qc2.number_input("Est. price per share ($)", min_value=0.01,
+                                                   value=100.0, step=1.0)
+                at_qty = max(1, int(at_dollar_amt / at_price_est))
+                st.caption(f"≈ **{at_qty}** shares @ ${at_price_est:.2f} = ${at_qty * at_price_est:,.2f}")
+            else:
                 rc1, rc2, rc3 = st.columns(3)
-                at_equity    = rc1.number_input("Account equity ($)", min_value=1.0, value=10000.0, step=500.0)
-                at_risk_pct  = rc2.number_input("Risk per trade (%)", min_value=0.1, max_value=10.0, value=1.0, step=0.1)
-                at_entry_est = rc3.number_input("Est. entry price ($)", min_value=0.01, value=100.0, step=1.0)
-                # Compute stop distance from the chosen mode/value
+                at_equity    = rc1.number_input("Account equity ($)", min_value=1.0,
+                                                 value=float(account.equity) if 'account' in dir() else 10000.0,
+                                                 step=500.0)
+                at_risk_pct  = rc2.number_input("Risk per trade (%)", min_value=0.1,
+                                                 max_value=10.0, value=1.0, step=0.1)
+                at_entry_est = rc3.number_input("Est. entry price ($)", min_value=0.01,
+                                                 value=100.0, step=1.0)
                 stop_dist_est = at_entry_est * at_stop_val / 100
                 at_qty = size_from_risk(at_equity, at_risk_pct, at_entry_est, stop_dist_est)
-                st.caption(f"Computed qty: **{at_qty}** shares "
-                           f"(risking ${at_equity * at_risk_pct / 100:,.2f} @ ${stop_dist_est:.2f} stop distance)")
-            else:
-                at_qty = st.number_input("Qty (shares)", min_value=1, value=1, step=1)
+                st.caption(f"**{at_qty}** shares — risking "
+                           f"${at_equity * at_risk_pct / 100:,.2f} @ ${stop_dist_est:.2f} stop dist")
 
             at_poll = st.number_input("Poll interval (s)", min_value=1,
                                       value=int(env_get("AT_POLL", "5")), step=1)
@@ -450,31 +676,44 @@ if broker == "Alpaca (Paper)":
             stop_all_btn = col_stop_all.form_submit_button("⏹ Stop All")
 
         if start_btn:
-            cfg = TraderConfig(
-                stop_mode             = StopMode(at_stop_mode.lower()),
-                stop_value            = at_stop_val,
-                poll_interval         = float(at_poll),
-                entry_mode            = EntryMode(at_entry_mode.lower()),
-                limit_price           = at_limit_price,
-                limit_timeout_s       = float(at_limit_timeout),
-                scale_tranches        = at_scale_n,
-                scale_interval_s      = float(at_scale_ivl),
-                tp_trigger_pct        = at_tp_pct,
-                tp_qty_fraction       = at_tp_frac,
-                breakeven_trigger_pct = at_be_pct,
-                time_stop_minutes     = float(at_time_stop),
-            )
-            try:
-                mt.start(at_symbol, int(at_qty), config=cfg)
-                st.success(f"Started {at_symbol} — {at_stop_mode} stop @ {at_stop_val}")
-            except Exception as e:
-                st.error(str(e))
+            if not at_symbol:
+                st.error("Symbol must not be empty.")
+            else:
+                cfg = TraderConfig(
+                    stop_mode             = StopMode(at_stop_mode.lower()),
+                    stop_value            = at_stop_val,
+                    poll_interval         = float(at_poll),
+                    entry_mode            = EntryMode(at_entry_mode.lower()),
+                    limit_price           = at_limit_price,
+                    limit_timeout_s       = float(at_limit_timeout),
+                    scale_tranches        = at_scale_n,
+                    scale_interval_s      = float(at_scale_ivl),
+                    tp_trigger_pct        = at_tp_pct,
+                    tp_qty_fraction       = at_tp_frac,
+                    breakeven_trigger_pct = at_be_pct,
+                    time_stop_minutes     = float(at_time_stop),
+                )
+                try:
+                    mt.start(at_symbol, int(at_qty), config=cfg)
+                    queue = st.session_state.pop("at_queue", [])
+                    if queue:
+                        st.session_state["at_prefill_list"] = queue
+                        st.success(f"Started {at_symbol}. Next in queue: {queue[0]}")
+                    else:
+                        st.success(f"Started {at_symbol} — {at_stop_mode} stop @ {at_stop_val}")
+                except Exception as e:
+                    st.error(str(e))
             st.rerun()
 
         if stop_all_btn:
             mt.stop_all()
+            st.session_state.pop("at_queue", None)
             st.info("All positions stopped.")
             st.rerun()
+
+        if st.session_state.get("at_queue"):
+            q = st.session_state["at_queue"]
+            st.info(f"Queue: {' → '.join(q)}  (configure & start each in turn)")
 
         # ── Positions table ───────────────────────────────────────────────
         statuses = mt.statuses()
@@ -557,6 +796,176 @@ if broker == "Alpaca (Paper)":
             time.sleep(5)
             st.rerun()
 
+    # ── Page: Portfolio Mode ─────────────────────────────────────────────────
+    elif page == "Portfolio Mode":
+        st.subheader("Portfolio Mode")
+        st.caption(
+            "Automatically maintains up to N positions from scanner picks. "
+            "Each slot is sized at a fixed % of equity. On exit, the next best candidate is opened."
+        )
+
+        def alpaca_get_price_pm(symbol: str) -> float:
+            from alpaca.data.requests import StockLatestQuoteRequest
+            quote = data_client.get_stock_latest_quote(StockLatestQuoteRequest(symbol_or_symbols=symbol))
+            return float(quote[symbol].ask_price or quote[symbol].bid_price)
+
+        def alpaca_buy_pm(symbol: str, qty: int):
+            trading_client.submit_order(MarketOrderRequest(
+                symbol=symbol, qty=qty,
+                side=OrderSide.BUY, time_in_force=TimeInForce.DAY
+            ))
+
+        def alpaca_sell_pm(symbol: str, qty: int):
+            trading_client.submit_order(MarketOrderRequest(
+                symbol=symbol, qty=qty,
+                side=OrderSide.SELL, time_in_force=TimeInForce.DAY
+            ))
+
+        def alpaca_get_bars_pm(symbol: str) -> pd.DataFrame:
+            bars = data_client.get_stock_bars(StockBarsRequest(
+                symbol_or_symbols=symbol,
+                timeframe=TimeFrame.Day,
+                start=datetime.now() - timedelta(days=30),
+            )).df
+            bars = bars.reset_index(level=0, drop=True)
+            return bars[["open", "high", "low", "close", "volume"]]
+
+        def alpaca_get_equity() -> float:
+            return float(trading_client.get_account().equity)
+
+        pm_exists = "portfolio_manager" in st.session_state
+        pm_running = pm_exists and st.session_state["portfolio_manager"].running
+
+        # ── Configuration ─────────────────────────────────────────────────
+        with st.expander("Configuration", expanded=not pm_running):
+            pmc1, pmc2 = st.columns(2)
+            pm_slots    = pmc1.number_input("Target slots", min_value=1, max_value=20,
+                                             value=int(env_get("PM_TARGET_SLOTS", "10")),
+                                             disabled=pm_running)
+            pm_slot_pct = pmc2.number_input("% of equity per slot", min_value=1.0,
+                                             max_value=50.0, step=1.0,
+                                             value=float(env_get("PM_SLOT_PCT", "10.0")),
+                                             disabled=pm_running)
+
+            pms1, pms2 = st.columns(2)
+            pm_stop_mode = pms1.selectbox("Stop mode", ["PCT", "ATR"],
+                                          disabled=pm_running)
+            pm_stop_val  = pms2.number_input(
+                "Trailing stop value",
+                min_value=0.1, max_value=20.0, step=0.1,
+                value=float(env_get("AT_THRESHOLD", "0.5")),
+                help="PCT: % drop from peak; ATR: N × ATR(14)",
+                disabled=pm_running,
+            )
+            pm_poll      = st.number_input("Poll interval (s)", min_value=1, max_value=60,
+                                            value=int(env_get("AT_POLL", "5")),
+                                            disabled=pm_running)
+            pm_loss_limit = st.number_input(
+                "Daily loss limit ($, 0 = off)", min_value=0.0, step=100.0,
+                value=float(env_get("AT_DAILY_LOSS_LIMIT", "0")),
+                disabled=pm_running,
+            )
+
+        # ── Start / Stop ──────────────────────────────────────────────────
+        btn_col1, btn_col2, _ = st.columns([1, 1, 4])
+        if btn_col1.button("▶  Start", type="primary", disabled=pm_running):
+            # Clear any stale instance so we recreate with fresh settings
+            st.session_state.pop("portfolio_manager", None)
+            cfg = TraderConfig(
+                stop_mode     = StopMode.PCT if pm_stop_mode == "PCT" else StopMode.ATR,
+                stop_value    = pm_stop_val,
+                poll_interval = float(pm_poll),
+            )
+            pm = get_portfolio_manager(
+                st.session_state,
+                data_client,
+                alpaca_get_price_pm,
+                alpaca_buy_pm,
+                alpaca_sell_pm,
+                alpaca_get_bars_pm,
+                alpaca_get_equity,
+                target_slots      = int(pm_slots),
+                slot_pct          = float(pm_slot_pct),
+                trader_config     = cfg,
+                daily_loss_limit  = float(pm_loss_limit),
+            )
+            pm.start()
+            st.rerun()
+
+        if btn_col2.button("⏹  Stop", disabled=not pm_running):
+            st.session_state["portfolio_manager"].stop()
+            st.rerun()
+
+        # ── Status ────────────────────────────────────────────────────────
+        if pm_exists:
+            pm = st.session_state["portfolio_manager"]
+            st.divider()
+
+            # Summary metrics
+            sm1, sm2, sm3, sm4 = st.columns(4)
+            sm1.metric("Active slots",    f"{pm.active_count()} / {pm._target_slots}")
+            sm2.metric("Open slots",      str(pm.open_slot_count()))
+            sm3.metric("Session P&L",     f"${pm.session_pnl():+,.2f}")
+            sm4.metric("Realized losses", f"${pm.realized_losses():,.2f}")
+
+            scan_age = pm.scan_age_s()
+            if scan_age is not None:
+                age_str = f"{int(scan_age // 60)}m {int(scan_age % 60)}s ago"
+                if scan_age > 1800:
+                    st.warning(f"Candidate list may be stale — last scan {age_str}")
+                else:
+                    st.caption(f"Last scan: {age_str}")
+
+            # Active positions table
+            statuses = pm.statuses()
+            active_rows = []
+            for sym, s in statuses.items():
+                if s.state in (TraderState.ENTERING, TraderState.WATCHING):
+                    active_rows.append({
+                        "Symbol":   sym,
+                        "State":    s.state.value.upper(),
+                        "Qty":      s.qty_remaining,
+                        "Entry":    f"${s.entry_price:.2f}",
+                        "Current":  f"${s.current_price:.2f}",
+                        "Peak":     f"${s.peak_price:.2f}",
+                        "Stop":     f"${s.stop_floor:.2f}",
+                        "P&L":      f"${s.pnl:+,.2f}",
+                        "Draw%":    f"{s.drawdown_pct:.2f}%",
+                    })
+            closed_rows = [
+                {
+                    "Symbol":  sym,
+                    "State":   s.state.value.upper(),
+                    "P&L":     f"${s.pnl:+,.2f}",
+                }
+                for sym, s in statuses.items()
+                if s.state not in (TraderState.ENTERING, TraderState.WATCHING)
+            ]
+
+            if active_rows:
+                st.subheader(f"Active positions ({len(active_rows)})")
+                st.dataframe(pd.DataFrame(active_rows), width="stretch", hide_index=True)
+            else:
+                st.info("No active positions yet.")
+
+            if closed_rows:
+                with st.expander(f"Closed this session ({len(closed_rows)})"):
+                    st.dataframe(pd.DataFrame(closed_rows), width="stretch", hide_index=True)
+
+            # Activity log
+            log = pm.log_entries()
+            if log:
+                st.subheader("Activity Log")
+                st.dataframe(
+                    pd.DataFrame(reversed(log)),
+                    width="stretch", hide_index=True,
+                )
+
+        # Auto-refresh while running
+        if pm_running:
+            time.sleep(5)
+            st.rerun()
+
     # ── Page: Scanner ────────────────────────────────────────────────────────
     elif page == "Scanner":
         st.subheader("Position Scanner")
@@ -630,31 +1039,40 @@ _Adjust thresholds in **⚙️ Settings → Scanner Filters**_
                 st.session_state.scan_results = scan(data_client, top_n=int(top_n),
                                                       progress_cb=on_progress, as_of=as_of_dt,
                                                       filters=scan_filters, symbols=scan_symbols)
-
+            st.session_state.scan_ts = datetime.now()
             progress_bar.empty()
 
         results = st.session_state.get("scan_results", pd.DataFrame())
 
         if not results.empty:
-            st.success(f"Found {len(results)} candidates. Click a row to select it.")
+            scan_ts = st.session_state.get("scan_ts")
+            if scan_ts:
+                age_s = (datetime.now() - scan_ts).total_seconds()
+                age_str = f"{int(age_s / 60)}m ago" if age_s >= 60 else f"{int(age_s)}s ago"
+                stale = age_s > 1800  # 30 min
+                msg = f"Last scan: {scan_ts.strftime('%H:%M:%S')} ({age_str})"
+                if stale:
+                    st.warning(f"Results may be stale — {msg}")
+                else:
+                    st.caption(msg)
+            st.success(f"Found {len(results)} candidates. Select rows then send to AutoTrader.")
 
             selection = st.dataframe(
                 results,
                 width="stretch",
                 on_select="rerun",
-                selection_mode="single-row",
+                selection_mode="multi-row",
                 key="scanner_table",
             )
 
-            # Resolve selected symbol
-            selected_symbol = None
+            # Multi-select → AutoTrader
             rows = selection.selection.get("rows", [])
-            if rows:
-                selected_symbol = results.index[rows[0]]
-                st.info(f"Selected: **{selected_symbol}**")
-                if st.button(f"▶ Send {selected_symbol} to AutoTrader", type="primary"):
-                    st.session_state.at_prefill = selected_symbol
-                    st.session_state.nav_page   = "AutoTrader"
+            selected_symbols = [results.index[r] for r in rows]
+            if selected_symbols:
+                st.info(f"Selected: {', '.join(f'**{s}**' for s in selected_symbols)}")
+                if st.button(f"▶ Send {len(selected_symbols)} symbol(s) to AutoTrader", type="primary"):
+                    st.session_state.at_prefill_list = selected_symbols
+                    st.session_state.nav_page        = "AutoTrader"
                     st.rerun()
 
             chart_col = "RS vs SPY" if "RS vs SPY" in results.columns else "5d Ret%"
@@ -685,8 +1103,10 @@ _Adjust thresholds in **⚙️ Settings → Scanner Filters**_
 
         if feed_type.startswith("Replay"):
             fc1, fc2, fc3 = st.columns(3)
-            bt_symbol = fc1.text_input("Symbol", value="AAPL").upper()
-            bt_date   = fc2.date_input("Date", value=datetime(2024, 11, 15).date(),
+            bt_symbol = fc1.text_input("Symbol", value=env_get("AT_SYMBOL", "")).upper()
+            _today = datetime.now().date()
+            _bt_default_date = _today - timedelta(days=[3, 1, 1, 1, 1, 1, 2][_today.weekday()])
+            bt_date   = fc2.date_input("Date", value=_bt_default_date,
                                         help="Must be a trading day (Mon–Fri, non-holiday)")
             bt_speed  = fc3.number_input("Speed (×)", min_value=1, max_value=10000,
                                           value=200, step=50,
@@ -892,6 +1312,19 @@ _Adjust thresholds in **⚙️ Settings → Scanner Filters**_
                 } for e in reversed(s.log)])
                 st.dataframe(log_df, width="stretch", hide_index=True)
 
+            if s.state in (TraderState.SOLD, TraderState.STOPPED):
+                broker_obj = st.session_state.get("bt_broker")
+                fills = broker_obj.fills if broker_obj else []
+                buys  = [f for f in fills if f["action"] == "BUY"]
+                sells = [f for f in fills if f["action"] == "SELL"]
+                pnl_color = "green" if s.pnl >= 0 else "red"
+                st.info(
+                    f"**Session complete** — "
+                    f"P&L: **:{pnl_color}[${s.pnl:+,.2f}]** | "
+                    f"Buys: {len(buys)} | Sells: {len(sells)} | "
+                    f"Total fills: {len(fills)}"
+                )
+
             if s.state == TraderState.WATCHING:
                 time.sleep(1)
                 st.rerun()
@@ -902,7 +1335,7 @@ _Adjust thresholds in **⚙️ Settings → Scanner Filters**_
         st.subheader("Session History")
         if st.button("Refresh history"):
             st.rerun()
-        sessions = load_sessions(bt_output if "bt_output" in dir() else DEFAULT_FILLS)
+        sessions = load_sessions(bt_output)
         if sessions:
             rows = []
             for s in sessions:
@@ -951,8 +1384,8 @@ else:
         st.warning("IBKR credentials not configured. Go to **Settings** to add them.")
         st.stop()
 
-    gw = get_gateway(ibkr_user, ibkr_pass, trading_mode)
-    ib = get_ib()
+    gw = _get_gateway(ibkr_user, ibkr_pass, trading_mode)
+    ib = _get_ib()
     api_port = 4002 if trading_mode == "paper" else 4001
 
     # ── Auto-start gateway and connect when credentials are present ───────────
@@ -1033,11 +1466,12 @@ else:
     summary = ib.accountSummary()
     tags = {v.tag: v.value for v in summary if v.currency in ("USD", "")}
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("Net Liquidation", f"${float(tags.get('NetLiquidation', 0)):,.2f}")
     col2.metric("Total Cash",      f"${float(tags.get('TotalCashValue', 0)):,.2f}")
     col3.metric("Buying Power",    f"${float(tags.get('BuyingPower', 0)):,.2f}")
     col4.metric("Unrealized P&L",  f"${float(tags.get('UnrealizedPnL', 0)):,.2f}")
+    col5.metric("Realized P&L",    f"${float(tags.get('RealizedPnL', 0)):,.2f}")
 
     st.divider()
 

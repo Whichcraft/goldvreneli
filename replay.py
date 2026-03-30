@@ -85,6 +85,12 @@ class ReplayPriceFeed:
         from alpaca.data.requests import StockBarsRequest
         from alpaca.data.timeframe import TimeFrame
 
+        if start_time is not None and end_time is not None and start_time >= end_time:
+            raise ValueError(
+                f"start_time ({start_time.strftime('%H:%M')}) must be before "
+                f"end_time ({end_time.strftime('%H:%M')})"
+            )
+
         day_start = datetime.strptime(replay_date, "%Y-%m-%d")
         day_end   = day_start + timedelta(days=1)
 
@@ -141,7 +147,8 @@ class ReplayPriceFeed:
     @property
     def progress(self) -> float:
         """Fraction of bars consumed (0.0–1.0)."""
-        return self._idx / len(self._prices) if self._prices else 0.0
+        with self._lock:
+            return self._idx / len(self._prices) if self._prices else 0.0
 
     @property
     def bar_count(self) -> int:
@@ -251,8 +258,9 @@ class MockBroker:
         self._write_lock    = threading.Lock()
         self._price_lock    = threading.Lock()
 
+        self._output_file.parent.mkdir(parents=True, exist_ok=True)
         self._session: Dict[str, Any] = {
-            "id":         str(uuid.uuid4())[:8],
+            "id":         str(uuid.uuid4())[:12],
             "started_at": datetime.now().isoformat(timespec="seconds"),
             "closed_at":  None,
             "meta":       session_meta or {},
