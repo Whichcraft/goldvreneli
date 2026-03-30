@@ -8,6 +8,13 @@ All notable changes to this project will be documented here.
 
 ---
 
+## [0.20.1] — 2026-03-30
+
+### Added
+- Scanner: when a completed scan returns zero candidates, show "📉 Not a good time to invest. Stock exchanges are not doing well right now — no candidates passed the quality filters."
+
+---
+
 ## [0.20.0] — 2026-03-30
 
 ### Added
