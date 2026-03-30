@@ -16,7 +16,7 @@ Scoring (higher = better):
   - ATR% (prefer moderate volatility)
   - Trend consistency (SMA20 > SMA50 slope)
 
-Fetch: 90 days of daily bars; parallelised with ThreadPoolExecutor.
+Fetch: 60 days of daily bars; parallelised with ThreadPoolExecutor.
 Uses Alpaca market data (free, no funded account needed).
 """
 
@@ -258,7 +258,7 @@ UNIVERSE_INTL_FULL = list(dict.fromkeys(UNIVERSE_INTL_FULL))
 UNIVERSE = list(dict.fromkeys(UNIVERSE_US + UNIVERSE_INTL_FULL))
 
 
-def fetch_bars(data_client, symbol: str, days: int = 90,
+def fetch_bars(data_client, symbol: str, days: int = 60,
                as_of: Optional[datetime] = None) -> Optional[pd.DataFrame]:
     """Fetch daily bars for a symbol using Alpaca data client."""
     from alpaca.data.requests import StockBarsRequest
@@ -370,7 +370,7 @@ def score_symbol(bars: pd.DataFrame,
     }
 
 
-def _batch_fetch(data_client, syms: list, days: int = 90,
+def _batch_fetch(data_client, syms: list, days: int = 60,
                  as_of: Optional[datetime] = None) -> Dict[str, pd.DataFrame]:
     """Fetch daily bars for multiple symbols in a single API call."""
     from alpaca.data.requests import StockBarsRequest
@@ -430,7 +430,7 @@ def scan(data_client, top_n: int = 10, progress_cb=None,
     chunks = [symbols[i:i + chunk_size] for i in range(0, len(symbols), chunk_size)]
     done = 0
     with ThreadPoolExecutor(max_workers=min(len(chunks), 4)) as ex:
-        futs = {ex.submit(_batch_fetch, data_client, chunk, 90, as_of): len(chunk)
+        futs = {ex.submit(_batch_fetch, data_client, chunk, 60, as_of): len(chunk)
                 for chunk in chunks}
         for fut in as_completed(futs):
             bars_map.update(fut.result())
@@ -440,17 +440,21 @@ def scan(data_client, top_n: int = 10, progress_cb=None,
 
     # ── Score ──────────────────────────────────────────────────────────────
     results = []
+    skipped_history = 0
     for sym, bars in bars_map.items():
+        if len(bars) < 52:
+            skipped_history += 1
+            continue
         scored = score_symbol(bars, spy_rets, filters)
         if scored:
             scored["Symbol"] = sym
             results.append(scored)
 
     if not results:
-        return pd.DataFrame()
+        return pd.DataFrame(), skipped_history
 
     df = pd.DataFrame(results)
     df = df.sort_values("_score", ascending=False).head(top_n)
     df = df.drop(columns=["_score"])
     df = df.set_index("Symbol")
-    return df
+    return df, skipped_history

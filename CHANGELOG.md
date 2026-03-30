@@ -8,6 +8,20 @@ All notable changes to this project will be documented here.
 
 ---
 
+## [0.34.0] — 2026-03-30
+
+### Fixed
+- Scanner: `fetch_bars()` lookback reduced from 90 to 60 days (saves bandwidth; most indicators only need ~52 bars) (#11)
+- Scanner: now surfaces a count of symbols skipped for insufficient price history (< 52 bars) below the results (#12)
+- Backtest: `load_sessions()` and `MockBroker._save_session()` in replay.py now log a visible warning when the fills JSON is corrupted instead of failing silently (#13)
+
+### Changed
+- Activity Log: table now includes a Symbol column (#14)
+- AutoTrader: PEAK log note text changed from "stop floor $" to "new stop floor $" for clarity (#15)
+- Portfolio: "Realized losses today" metric renamed to "Realized P&L today" with signed formatting (#18)
+
+---
+
 ## [0.33.0] — 2026-03-30
 
 _(in development)_

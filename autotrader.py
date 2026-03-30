@@ -93,6 +93,7 @@ class TradeLog:
     action:    str    # BUY | SELL | PEAK | STOP | TAKE_PROFIT | BREAKEVEN | TIME_STOP | CANCEL | INFO | ERROR
     price:     float
     note:      str = ""
+    symbol:    str = ""
 
 
 @dataclass
@@ -501,7 +502,7 @@ class AutoTrader:
                 if price > s.peak_price:
                     s.peak_price = price
                     self._update_stop_floor()
-                    self._log("PEAK", price, f"New peak ${price:.2f} | stop floor ${s.stop_floor:.2f}")
+                    self._log("PEAK", price, f"New peak ${price:.2f} | new stop floor ${s.stop_floor:.2f}")
 
                 # Breakeven activation
                 if (not s.breakeven_active
@@ -575,7 +576,7 @@ class AutoTrader:
             time.sleep(cfg.poll_interval)
 
     def _log(self, action: str, price: float, note: str = ""):
-        entry = TradeLog(timestamp=datetime.now(), action=action, price=price, note=note)
+        entry = TradeLog(timestamp=datetime.now(), action=action, price=price, note=note, symbol=self.status.symbol)
         self.status.log.append(entry)
         logger.info(f"[{self.status.symbol}][{action}] {note}")
 

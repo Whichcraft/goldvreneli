@@ -132,15 +132,17 @@ def render(data_client, get_price_fn, buy_fn, sell_fn, mt, use_hist, as_of_date,
 
         as_of_dt = datetime.combine(as_of_date, datetime.max.time()) if use_hist else None
         with st.spinner("Running scan…"):
-            st.session_state.scan_results = scan(data_client, top_n=int(top_n),
-                                                  progress_cb=on_progress, as_of=as_of_dt,
-                                                  filters=scan_filters, symbols=scan_symbols)
+            st.session_state.scan_results, st.session_state.scan_skipped = scan(
+                data_client, top_n=int(top_n),
+                progress_cb=on_progress, as_of=as_of_dt,
+                filters=scan_filters, symbols=scan_symbols)
         st.session_state.scan_ts = datetime.now()
         progress_bar.empty()
 
     results = st.session_state.get("scan_results", pd.DataFrame())
 
     scan_ran = st.session_state.get("scan_ts") is not None
+    skipped = st.session_state.get("scan_skipped", 0)
     if results.empty and scan_ran:
         st.warning(
             "📉 **Not a good time to invest.** "
@@ -148,6 +150,8 @@ def render(data_client, get_price_fn, buy_fn, sell_fn, mt, use_hist, as_of_date,
             "no candidates passed the quality filters. "
             "Try again later or loosen the filter thresholds."
         )
+    if scan_ran and skipped:
+        st.caption(f"{skipped} symbol(s) skipped — insufficient price history (< 52 bars).")
 
     if not results.empty:
         scan_ts = st.session_state.get("scan_ts")

@@ -27,10 +27,13 @@ Typical wiring
 """
 
 import json
+import logging
 import math
 import random
 import threading
 import uuid
+
+logger = logging.getLogger(__name__)
 from datetime import datetime, time as dtime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -335,7 +338,8 @@ class MockBroker:
                 data = json.loads(self._output_file.read_text())
                 if not isinstance(data, dict) or "sessions" not in data:
                     data = {"sessions": []}
-            except (json.JSONDecodeError, OSError):
+            except (json.JSONDecodeError, OSError) as exc:
+                logger.warning("Fills file %s is corrupted (%s) — starting fresh.", self._output_file, exc)
                 data = {"sessions": []}
         else:
             data = {"sessions": []}
@@ -364,5 +368,6 @@ def load_sessions(output_file: str) -> List[Dict]:
         data = json.loads(p.read_text())
         sessions = data.get("sessions", [])
         return list(reversed(sessions))
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("Fills file %s is corrupted or unreadable (%s) — session history lost.", output_file, exc)
         return []

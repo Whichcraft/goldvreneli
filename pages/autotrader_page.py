@@ -247,13 +247,14 @@ def render(mt, get_price_fn, buy_fn, sell_fn, get_bars_fn, get_equity_fn, broker
             st.divider()
             dl1, dl2 = st.columns(2)
             dl1.metric("Unrealized P&L (active)", f"${mt.unrealized_pnl():+,.2f}")
-            dl2.metric("Realized losses today",     f"${mt.realized_losses():,.2f}")
+            dl2.metric("Realized P&L today",     f"${mt.realized_losses():+,.2f}")
 
             # Combined log
             all_logs = mt.all_logs()
             if all_logs:
                 st.subheader("Activity Log")
                 log_data = [{"Time":   e.timestamp.strftime("%H:%M:%S"),
+                             "Symbol": e.symbol or "—",
                              "Action": e.action,
                              "Price":  f"${e.price:.2f}" if e.price else "—",
                              "Note":   e.note}
