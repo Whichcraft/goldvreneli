@@ -53,9 +53,13 @@ goldvreneli/
 ├── version.py                   # __version__ string
 ├── .env                         # credentials (created on first run)
 ├── tests/
-│   ├── test_autotrader.py       # 76 tests: TraderConfig, AutoTrader lifecycle, scale entry,
-│   │                            #   partial TP, ATR stop, MultiTrader, ReplayPriceFeed
-│   └── test_scanner.py          # score_symbol with fixture DataFrames
+│   ├── test_autotrader.py       # 69 tests: TraderConfig, AutoTrader lifecycle, scale entry,
+│   │                            #   partial TP, ATR stop, MultiTrader (set_threshold,
+│   │                            #   snapshot isolation), ReplayPriceFeed
+│   ├── test_portfolio.py        # 10 tests: PortfolioManager start_all, pause/resume,
+│   │                            #   slot sizing, refill-on-close
+│   ├── test_core.py             # 17 tests: daily_loss I/O, env_save/env_get, LiveFillLogger
+│   └── test_scanner.py          # 11 tests: score_symbol with fixture DataFrames
 ├── daily_loss.json              # today's cumulative realized loss (auto-managed)
 ├── live_fills.json              # live trade fill history (auto-managed)
 ```
@@ -70,7 +74,7 @@ Each page module in `pages/` exports a single public function `render(...)`. The
 | `help_page` | `render()` | none |
 | `portfolio_page` | `render(broker, trading_client, data_client, account, ib, gw, alpaca_is_live, ibkr_is_live, get_bars_fn)` | plotly, alpaca data types |
 | `autotrader_page` | `render(mt, get_price_fn, buy_fn, sell_fn, get_bars_fn, get_equity_fn, broker, trading_client, ib)` | `TraderState`, `TraderConfig`, `load_sessions`, `LIVE_FILLS_FILE` |
-| `portfolio_mode_page` | `render(mt, data_client, get_price_fn, buy_fn, sell_fn, get_bars_fn, get_equity_fn, broker, trading_client, ib)` | `TraderState`, `ScanFilters`, `get_portfolio_manager` |
+| `portfolio_mode_page` | `render(mt, data_client, get_price_fn, buy_fn, sell_fn, get_bars_fn, get_equity_fn, broker, trading_client, ib)` | `TraderState`, `ScanFilters`, `get_portfolio_manager`; ⏸ Pause / ▶ Resume / 🔄 Rescan buttons |
 | `scanner_page` | `render(data_client, get_price_fn, buy_fn, sell_fn, mt, use_hist, as_of_date, broker)` | `scan`, `ScanFilters`, universe lists |
 | `test_mode_page` | `render(data_client, get_price_fn, get_bars_fn)` | `MultiTrader`, `ReplayPriceFeed`, `_ReplayDispatcher`, `autotrader_page` |
 
@@ -83,7 +87,7 @@ Each page module in `pages/` exports a single public function `render(...)`. The
 Single source of truth for the package version string.
 
 ```python
-__version__ = "1.1.0"
+__version__ = "1.4.1"
 ```
 
 ---
@@ -262,9 +266,10 @@ MultiTrader(
 |---|---|---|
 | `start` | `(symbol, qty, config=None, threshold_pct=None, poll_interval=None, on_close=None) → AutoTrader` | Start new position (raises if loss limit hit) |
 | `attach` | `(symbol, qty, entry_price, config=None, on_close=None) → AutoTrader` | Attach to existing position |
+| `set_threshold` | `(symbol: str, pct: float)` | Adjust trailing stop % live for a WATCHING position (PCT mode only; no-op otherwise) |
 | `stop` | `(symbol: str)` | Stop single position |
 | `stop_all` | `()` | Stop all WATCHING positions |
-| `statuses` | `() → Dict[str, AutoTraderStatus]` | Snapshot of all traders |
+| `statuses` | `() → Dict[str, AutoTraderStatus]` | Snapshot copies of all traders (thread-safe; log lists are independent copies) |
 | `active_symbols` | `() → List[str]` | Symbols in WATCHING state |
 | `all_logs` | `() → List[TradeLog]` | Merged sorted logs |
 | `unrealized_pnl` | `() → float` | Sum of unrealized P&L |
@@ -320,7 +325,10 @@ PortfolioManager(
 | `start` | `()` | Scan → fill all slots sequentially |
 | `start_all` | `()` | Scan → open all slots in parallel |
 | `stop` | `()` | Stop portfolio (open positions remain) |
+| `pause` | `()` | Block new slot openings; running positions continue unaffected |
+| `resume` | `()` | Re-enable slot openings; spawns `_fill_empty_slots` thread to fill any gaps |
 | `running` | `@property → bool` | Whether portfolio is active |
+| `paused` | `@property → bool` | Whether new slot openings are blocked |
 | `active_count` | `() → int` | Positions in ENTERING or WATCHING |
 | `open_slot_count` | `() → int` | Empty slots |
 | `statuses` | `() → Dict` | Snapshot of all trader statuses |
@@ -350,6 +358,7 @@ PortfolioManager(
 - `_lock: threading.Lock` — candidates/log/claimed
 - `_scan_lock: threading.Lock` — prevents concurrent rescans
 - `_session_pnl: float`
+- `_paused: bool` — when True, `_open_one_slot()` returns immediately (positions already running are unaffected)
 
 **Constants:** `_SCAN_MAX_AGE_S = 1800` (30 min)
 
@@ -613,9 +622,9 @@ GatewayManager(
 | **Settings** | Alpaca/IBKR credentials; scanner/AutoTrader/Portfolio defaults |
 | **Help** | Documentation, workflows, keyboard shortcuts |
 | **Portfolio** | Account metrics, positions, price chart, place orders, open orders |
-| **AutoTrader** | Multi-symbol manager, queue, position table, daily summary, trade history, CSV export |
-| **Portfolio Mode** | Automated multi-slot investing, monitoring |
-| **Scanner** | Technical screening, Quick Invest (skips already-open positions), queue to AutoTrader |
+| **AutoTrader** | Multi-symbol manager, queue, position table (live trailing-stop adjustment, ERROR restart), daily summary, trade history, CSV export |
+| **Portfolio Mode** | Automated multi-slot investing, Pause/Resume, manual Rescan, monitor existing positions |
+| **Scanner** | Technical screening, sort controls, Quick Invest (skips already-open positions), queue to AutoTrader |
 | **Test Mode** | Paper trading against live or historical prices; per-symbol replay progress |
 
 #### Broker scope
@@ -740,8 +749,12 @@ User: start_all()
   → _fill_empty_slots_parallel()
   → _rescan() → top N candidates
   → N threads, each: _open_one_slot()
+      → returns immediately if _paused
       → _next_candidate() → size qty → MultiTrader.start()
       → on_close: _session_pnl += pnl → spawn next slot
+
+User: pause()   → _paused=True  (running positions unaffected)
+User: resume()  → _paused=False → spawn _fill_empty_slots thread
 ```
 
 ### Scanner flow
@@ -829,7 +842,9 @@ Settings page (goldvreneli.py) — reads defaults, writes on Save
 
 Run with: `venv/bin/python -m pytest tests/ -v`
 
-### `tests/test_autotrader.py` — 76 tests
+**Total: 107 tests** across four files.
+
+### `tests/test_autotrader.py` — 69 tests
 
 | Class | Tests | What is covered |
 |---|---|---|
@@ -842,12 +857,35 @@ Run with: `venv/bin/python -m pytest tests/ -v`
 | `TestScaleEntry` | 8 | Scale buy: full fill, partial fill on exception, ATR stop compatibility |
 | `TestPartialTakeProfit` | 6 | Take-profit partial exit; qty_remaining; trailing the remainder |
 | `TestAtrStopLifecycle` | 8 | ATR stop calculation, cache TTL, stop movement |
-| `TestMultiTrader` | 11 | Concurrent positions, daily loss limit enforcement, `active_symbols()` |
-| `TestReplayPriceFeed` | 10 | Replay advance, exhaustion, `object.__new__` bypass for unit testing without API calls |
+| `TestMultiTrader` | 10 | Concurrent positions, daily loss limit, `statuses()` snapshot isolation, `set_threshold()` (WATCHING / unknown / non-WATCHING) |
+| `TestReplayPriceFeed` | 4 | Replay advance, exhaustion, `object.__new__` bypass |
 
-### `tests/test_scanner.py`
+### `tests/test_portfolio.py` — 10 tests
 
-Unit tests for `score_symbol()` with fixture DataFrames. Covers filter pass/fail and scoring formula correctness.
+| Test | What is covered |
+|---|---|
+| `test_daily_loss_limit_propagated` | `PortfolioManager` passes limit through to `MultiTrader` |
+| `test_zero_daily_loss_limit` | Zero limit stored without error |
+| `test_start_all_opens_n_slots` | N positions opened concurrently |
+| `test_start_all_does_not_exceed_target` | Active count never exceeds `target_slots` |
+| `test_start_idempotent` | Second `start_all()` call is a no-op |
+| `test_running_flag` | `running` property reflects lifecycle |
+| `test_pause_blocks_new_opens` | `_open_one_slot()` returns immediately when `_paused=True` |
+| `test_resume_after_pause` | `resume()` clears pause flag |
+| `test_slot_dollar_sizing` | `slot_dollar / price` → correct qty |
+| `test_refill_on_close` | Replacement slot opened after time-stop close |
+
+### `tests/test_core.py` — 17 tests
+
+| Class | Tests | What is covered |
+|---|---|---|
+| `TestDailyLoss` | 7 | `load_daily_loss` (missing file, stale date, corrupt JSON), `save_daily_loss` (creates file, atomic write, roundtrip) |
+| `TestEnvSaveGet` | 4 | `env_save` (writes file, updates `os.environ`), `env_get` (default, `os.environ` priority) |
+| `TestLiveFillLogger` | 6 | Session open/close, fill recording, multiple fills, corrupt-file recovery |
+
+### `tests/test_scanner.py` — 11 tests
+
+Unit tests for `score_symbol()` with fixture DataFrames. Covers filter pass/fail (price, ADV, volume, RSI, history length) and scoring formula correctness.
 
 ---
 
