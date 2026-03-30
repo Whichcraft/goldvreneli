@@ -23,6 +23,7 @@ Multi-position management:
                 optional daily loss limit.
 """
 
+import dataclasses
 import logging
 import threading
 import time
@@ -250,6 +251,10 @@ class AutoTrader:
                 stop_value    = threshold_pct if threshold_pct is not None else self._default_threshold,
                 poll_interval = poll_interval if poll_interval is not None else self._default_poll,
             )
+        else:
+            # Always work on a private copy so mutations in _run() (e.g. disabling
+            # take-profit after it fires) never affect the caller's TraderConfig.
+            config = dataclasses.replace(config)
 
         if config.stop_mode == StopMode.ATR and self._get_bars is None:
             raise ValueError("ATR stop mode requires a get_bars callable.")
