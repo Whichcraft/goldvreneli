@@ -8,6 +8,17 @@ All notable changes to this project will be documented here.
 
 ---
 
+## [0.19.0] — 2026-03-30
+
+### Added
+- Portfolio Mode: **Start All** button opens all slots simultaneously in parallel threads
+- Portfolio Mode: **Start Sequential** (renamed from Start) opens slots one at a time and replaces each on close — existing behaviour
+- Portfolio Mode: **Fixed $ per slot** sizing mode — specify e.g. `$3000` per position instead of % of equity; total exposure hint shown in UI
+- `PortfolioManager`: `slot_dollar` parameter; `start_all()` method; `_fill_empty_slots_parallel()` internal
+- `PM_SLOT_DOLLAR` env key persisted to `.env` via Settings
+
+---
+
 ## [0.18.1] — 2026-03-30
 
 ### Fixed

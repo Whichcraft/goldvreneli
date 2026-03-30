@@ -1,6 +1,6 @@
 # Goldvreneli Trading Dashboard
 
-![Version](https://img.shields.io/badge/version-0.18.1-blue)
+![Version](https://img.shields.io/badge/version-0.19.0-blue)
 
 A Streamlit-based trading dashboard supporting **Alpaca Paper and Live Trading** and **Interactive Brokers (IBKR)** via IB Gateway, with automated trailing-stop trading, technical scanning, portfolio automation, and offline backtesting.
 
@@ -194,12 +194,19 @@ Fully automated multi-position manager. Runs the scanner, opens positions in the
 4. When a position closes (stop triggered), the next scanner pick is opened automatically
 5. If no qualifying candidates exist, the slot stays empty until the next rescan
 
+**Start modes**
+
+| Button | Behaviour |
+|--------|-----------|
+| Start Sequential | Open the first slot, then the next when each closes (one active at a time per open) |
+| Start All | Open all slots simultaneously at launch |
+
 **Configuration**
 
 | Setting | Default | Description |
 |---------|---------|-------------|
 | Target slots | 10 | Maximum simultaneous positions |
-| % of equity per slot | 10% | Position size as fraction of equity |
+| Slot sizing | % of equity | Choose "% of equity" or "Fixed $ per slot" (e.g. $3000/slot) |
 | Stop mode | PCT | PCT or ATR trailing stop |
 | Trailing stop value | 0.5% | % drop from peak (PCT) or ATR multiplier |
 | Poll interval | 5s | How often each position checks the price |
