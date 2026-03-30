@@ -8,6 +8,73 @@ All notable changes to this project will be documented here.
 
 ---
 
+## [1.4.1] — 2026-03-30
+
+### Added
+- **Unit tests: `test_core.py`** — 17 new tests covering `load_daily_loss` / `save_daily_loss` (stale date, corrupt JSON, atomic write, roundtrip), `env_save` / `env_get` (file write, `os.environ` priority), and `LiveFillLogger` (session open/close, fill accumulation, corrupt-file tolerance)
+- **Unit tests: `MultiTrader` coverage** — 5 new tests: snapshot isolation of `statuses()`, `set_threshold()` on a WATCHING position, and no-op behaviour for unknown / non-WATCHING symbols
+
+Total test count: 107 (up from 86)
+
+---
+
+## [1.4.0] — 2026-03-30
+
+### Fixed
+- **Scanner: unhandled `TimeoutError` and per-chunk exceptions** — `as_completed(timeout=120)` now wrapped in `try/except TimeoutError`; individual chunk failures caught and skipped so a single bad batch no longer aborts the entire scan (#58)
+- **Portfolio ticker strip: stale dismissed-symbol set** — dismissed symbols are now pruned to the current open-position set on every render, preventing symbols from being silently hidden after close+reopen (#62)
+- **Scanner sort ≠ Quick Invest order** — user-controlled sort (column + ascending/descending) is applied to `results` before both the dataframe and Quick Invest, so the top-N picks always match what's visible in the table (#64)
+
+### Added
+- **Sidebar: active broker/mode badge** — clear `🟢 Active: Alpaca · Live` / `🟡 Active: Alpaca · Paper` / IBKR equivalents replace the plain text captions, with live mode keeping its red warning (#57)
+- **AutoTrader: live trailing-stop adjustment** — each WATCHING position card now shows a number input for the trailing stop %; changing it calls `mt.set_threshold()` live without stopping the position (#59)
+- **Portfolio Mode: Pause / Resume** — new ⏸ Pause button halts new slot opens while existing positions continue to trail; ▶ Resume fills empty slots again. `PortfolioManager.pause()` / `.resume()` added to the public API (#60)
+- **Portfolio Mode: 🔄 Rescan Now button** — triggers a fresh candidate scan immediately without waiting for the 30-minute auto-stale threshold (#63)
+- **Settings: IBKR gateway test button** — "Test IBKR Gateway" button checks `ib.isConnected()` and queries `accountSummary()`, showing net liquidation on success (#61)
+- **2 new PortfolioManager tests** — `test_pause_blocks_new_opens`, `test_resume_after_pause`
+
+---
+
+## [1.3.1] — 2026-03-30
+
+### Added
+- **Symbol autocomplete** — Place Order forms in the Portfolio page now use a searchable selectbox (type to filter) populated from the scanner universe instead of a free-text input; remembers last-used symbol across submits (#54)
+
+### Changed
+- **"Top N" labels replaced** — "Top N results" → "Max scan results" (Settings), "Top N to invest" → "Positions to open" (Scanner Quick Invest), "Invest All (N)" → "Invest All (N stocks)" (#52)
+- **Side column removed** from Alpaca open-positions table — always "long" in this long-only system; removing dead data (#53)
+
+### Verified (no code change needed)
+- **Peak price recalculated on every poll** — confirmed at `autotrader.py:556`; covered by ATR stop tests (#56)
+- **Portfolio refill on close** — confirmed by `test_refill_on_close` test added in 1.3.0 (#55)
+
+---
+
+## [1.3.0] — 2026-03-30
+
+### Added
+- **Portfolio ticker strip** — compact winner/loser cards at the top of the Portfolio page (top 3 by P&L %) with Keep (dismiss) and Sell (with confirmation) quick-action buttons (#49)
+- **Cash-out panel** — "Cash Out All" expander in Portfolio page; sells all open positions via market orders with confirmation checkbox (#48)
+- **AutoTrader ERROR restart** — Restart button in the AutoTrader live view for ERROR-state positions; requires confirmation checkbox; calls `mt.stop()` then `mt.start()` with original config (#41)
+- **Settings: Test Connection** — "Test Alpaca Paper" and "Test Alpaca Live" buttons outside the settings form; tests currently saved keys via `get_account()` and shows inline result (#43)
+- **Scanner ETF/ATR warning** — info banner shown when broker is IBKR, explaining ATR stops may not work for ETFs (#46)
+- **PortfolioManager smoke tests** — 8 new tests in `tests/test_portfolio.py`: start_all opens N slots, does not exceed target, is idempotent, slot_dollar sizing, running flag, daily_loss_limit propagation, refill on close (#40)
+
+### Changed
+- **Sidebar: Historic data mode grouped with Testing** — `use_hist` toggle now appears directly under the Test Mode radio in the Testing sidebar section (#28)
+- **Scanner fetch timeout** — `as_completed(futs, timeout=120)` added to prevent a hung Alpaca batch fetch from blocking the scanner indefinitely (#33)
+- **`MultiTrader.statuses()` returns snapshots** — each `AutoTraderStatus` is now copied under the lock; UI never reads a half-written composite update (#29)
+- **TraderConfig mutation invariant documented** — `set_threshold()` docstring now explicitly states it is the only config field that may be mutated after `start()`/`attach()` (#47)
+
+---
+
+## [1.2.1] — 2026-03-30
+
+### Added
+- **Quick Invest — "Invest All" button** — new "⚡ Invest All (N)" button invests in every scan result at once, bypassing the Top N limit
+
+---
+
 ## [1.2.0] — 2026-03-30
 
 ### Fixed

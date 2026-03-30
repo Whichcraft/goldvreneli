@@ -1,6 +1,6 @@
 # Goldvreneli Trading Dashboard
 
-![Version](https://img.shields.io/badge/version-1.2.0-blue)
+![Version](https://img.shields.io/badge/version-1.4.1-blue)
 
 A Streamlit-based trading dashboard supporting **Alpaca Paper and Live Trading** and **Interactive Brokers (IBKR)** via IB Gateway, with automated trailing-stop trading, technical scanning, and portfolio automation.
 
@@ -291,7 +291,7 @@ Business logic is fully decoupled from the UI. Run the test suite with:
 venv/bin/python -m pytest tests/ -v
 ```
 
-Covers `size_from_risk`, `_calc_atr`, `SyntheticPriceFeed`, `MockBroker`, `AutoTrader` full lifecycle (market/limit/scale entry, trailing stop, take-profit, breakeven, time stop, error state), and `score_symbol` with synthetic fixture DataFrames.
+Covers `size_from_risk`, `_calc_atr`, `SyntheticPriceFeed`, `MockBroker`, `AutoTrader` full lifecycle (market/limit/scale entry, trailing stop, take-profit, breakeven, time stop, error state), `MultiTrader` (concurrent positions, daily-loss limit, `set_threshold`, snapshot isolation), `score_symbol` with synthetic fixture DataFrames, `PortfolioManager` (start_all, pause/resume, slot sizing, refill-on-close), and `core.py` (daily-loss persistence, env I/O, `LiveFillLogger`).
 
 ### 🧪 Test mode (Scanner historic data)
 

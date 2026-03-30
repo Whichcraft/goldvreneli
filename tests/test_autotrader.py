@@ -707,6 +707,41 @@ class TestMultiTrader:
         assert "P" in s and "Q" in s
         mt.stop_all()
 
+    def test_statuses_returns_snapshot_copies(self):
+        """statuses() must return independent copies (modifying the dict does not mutate trader)."""
+        mt, _, _ = self._make_mt()
+        cfg = TraderConfig(stop_value=99.0, poll_interval=0.01)
+        mt.start("SNAP", 1, config=cfg)
+        wait_for_state(mt._traders["SNAP"], TraderState.WATCHING, timeout=3)
+        s1 = mt.statuses()
+        s2 = mt.statuses()
+        # Two calls must return distinct dict objects
+        assert s1 is not s2
+        # Log list must be a copy, not the live list
+        assert s1["SNAP"].log is not mt._traders["SNAP"].status.log
+        mt.stop_all()
+
+    def test_set_threshold_updates_watching_position(self):
+        """set_threshold changes the stop_value for a WATCHING position."""
+        mt, _, _ = self._make_mt()
+        cfg = TraderConfig(stop_value=5.0, poll_interval=0.01)
+        mt.start("TH", 1, config=cfg)
+        wait_for_state(mt._traders["TH"], TraderState.WATCHING, timeout=3)
+        mt.set_threshold("TH", 2.5)
+        assert mt._traders["TH"].status.config.stop_value == pytest.approx(2.5)
+        mt.stop_all()
+
+    def test_set_threshold_noop_for_unknown_symbol(self):
+        """set_threshold on a symbol that doesn't exist must not raise."""
+        mt, _, _ = self._make_mt()
+        mt.set_threshold("UNKNOWN", 1.0)   # should be a no-op
+
+    def test_set_threshold_noop_when_not_watching(self):
+        """set_threshold must be ignored if the trader is not in WATCHING state."""
+        mt, _, _ = self._make_mt()
+        # Trader not started yet — not present in _traders at all
+        mt.set_threshold("IDLE", 1.0)   # must not raise
+
 
 # ── ReplayPriceFeed ───────────────────────────────────────────────────────────
 
