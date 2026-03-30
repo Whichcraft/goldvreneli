@@ -8,6 +8,36 @@ All notable changes to this project will be documented here.
 
 ---
 
+## [0.25.0] — 2026-03-30
+
+### Added
+- **Portfolio: combined positions view** — Open Positions section now fetches from all configured accounts: Alpaca Paper, Alpaca Live (if keys set), and IBKR (if Gateway connected); each shown in a labeled sub-section with its own table and P&L chart
+- **AutoTrader: qty sizing outside form** — Qty mode radio and inputs moved outside `st.form` so switching between Shares / Dollar amount / Risk % updates the inputs immediately without requiring form submission; Risk % mode adds a standalone "Est. stop %" input
+
+### Fixed
+- Qty mode: switching back to "Shares" now correctly shows the shares input (was stuck on previous mode's inputs inside the form)
+
+### Changed
+- CLAUDE.md: docs update (README + CHANGELOG) required on every version bump
+
+---
+
+## [0.24.0] — 2026-03-30
+
+### Added
+- **Sidebar: 🧪 Test mode (historic data)** toggle
+- Scanner: "Historical date" / "As-of date" moved from scanner page to sidebar toggle
+
+### Changed
+- Scanner: "Top N results" renamed to "How many top candidates to return"
+- Sidebar: active account/mode shown below version heading
+- Removed `Portfolio Dashboard` page title from Alpaca and IBKR pages
+
+### Fixed
+- `StreamlitValueBelowMinError` when `PM_SLOT_DOLLAR=0` written to `.env`
+
+---
+
 ## [0.23.6] — 2026-03-30
 
 ### Added
