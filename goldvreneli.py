@@ -617,16 +617,23 @@ if broker == "Alpaca":
                               alpaca_get_price, alpaca_buy, alpaca_sell, alpaca_get_bars)
 
         # ── New position form ─────────────────────────────────────────────
-        # Handle multi-symbol prefill from Scanner
+        # Handle multi-symbol prefill from Scanner.
+        # at_prefill_list / at_prefill are one-shot signals written by the
+        # Scanner page. We immediately move their value into at_current_symbol
+        # (which survives reruns) so the form stays filled on every rerender.
         _prefill_list = st.session_state.pop("at_prefill_list", None)
         _prefill_single = st.session_state.pop("at_prefill", None)
         if _prefill_list:
-            _default_symbol = _prefill_list[0]
+            st.session_state["at_current_symbol"] = _prefill_list[0]
             _queued = _prefill_list[1:]
             if _queued:
                 st.session_state["at_queue"] = _queued
-        else:
-            _default_symbol = _prefill_single or env_get("AT_SYMBOL", "")
+            else:
+                st.session_state.pop("at_queue", None)
+        elif _prefill_single:
+            st.session_state["at_current_symbol"] = _prefill_single
+
+        _default_symbol = st.session_state.get("at_current_symbol", env_get("AT_SYMBOL", ""))
 
         with st.form("at_config"):
             st.markdown("**New Position**")
@@ -722,9 +729,14 @@ if broker == "Alpaca":
                     mt.start(at_symbol, int(at_qty), config=cfg)
                     queue = st.session_state.pop("at_queue", [])
                     if queue:
-                        st.session_state["at_prefill_list"] = queue
+                        # Advance to next symbol immediately so the form is ready
+                        st.session_state["at_current_symbol"] = queue[0]
+                        remaining = queue[1:]
+                        if remaining:
+                            st.session_state["at_queue"] = remaining
                         st.success(f"Started {at_symbol}. Next in queue: {queue[0]}")
                     else:
+                        st.session_state.pop("at_current_symbol", None)
                         st.success(f"Started {at_symbol} — {at_stop_mode} stop @ {at_stop_val}")
                 except Exception as e:
                     st.error(str(e))
