@@ -8,6 +8,21 @@ All notable changes to this project will be documented here.
 
 ---
 
+## [0.21.0] — 2026-03-30
+
+### Changed
+- Sidebar nav reordered: Scanner is now first (entry point), followed by Portfolio Mode, AutoTrader, Portfolio, Backtest, Settings, Help
+- Scanner caption updated to say "Start Here" with a one-line summary of the quick path
+
+### Added
+- Sidebar: persistent 3-step "Suggested workflow" guide
+- AutoTrader: empty-state hint guides to Scanner when no positions; adapts if scan results are already available
+- Portfolio Mode: 3-step "how to start" hint shown when not running
+- Portfolio: "no open positions" hint links to Scanner
+- Help Quick Start: rewritten with three distinct workflows (A: fully automated, B: scanner + quick invest, C: full manual)
+
+---
+
 ## [0.20.1] — 2026-03-30
 
 ### Added
