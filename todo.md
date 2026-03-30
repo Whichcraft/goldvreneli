@@ -2,6 +2,57 @@
 
 ---
 
+## Open (v1.5.x)
+
+### 65. Add-to-position instead of skipping already-open symbols
+When a symbol that is already being tracked by AutoTrader appears in the scanner or Quick Invest, it is currently skipped with a "already open — skipped" notice. Instead, offer to **add to the existing position**: calculate how many extra shares the new dollar amount buys at current price, then call `place_buy` and increment `qty` / `qty_remaining` on the existing `AutoTrader` without restarting it. The stop floor and peak should be re-evaluated after the size increase.
+- Add `AutoTrader.add_shares(qty)` that places a buy and updates internal size state
+- In Quick Invest / queue handling, detect open symbols and call `add_shares` instead of skipping
+- Show the add-on as an `INFO` log entry ("Added N shares at $X.XX")
+
+### 66. Uniform activity log formatting
+All log lines should follow a single format:
+```
+HH:MM:SS  SYM  ACTION  $price  note
+```
+Example: `21:05:00  UCO  PEAK  $42.61  New peak — stop → $42.18`
+- Remove the redundant "new stop floor" phrase; keep only the stop price in the note
+- Enforce monospace font for the entire log table (use `st.code` block or CSS `font-family: monospace`)
+- Color-code action tokens consistently: green for BUY/PEAK/BREAKEVEN, red for SELL/STOP/ERROR, yellow for INFO/TAKE_PROFIT, grey for CANCEL
+- Apply the same format in both the full log table and the sidebar compact log
+
+### 67. Positions page — move live position cards out of AutoTrader page
+Create a dedicated **Positions** page that shows:
+- Live position cards (current price, peak, stop floor, P&L, drawdown) — currently in AutoTrader page
+- Last 20 activity log entries per position
+- Per-position actions: adjust stop, restart (on ERROR), stop monitoring
+Remove the position cards and activity log from `autotrader_page.py`; keep only the entry form and queue there.
+- New page module `pages/positions_page.py` with `render(mt, get_price_fn, …)`
+- Register page in `goldvreneli.py` sidebar nav
+
+### 68. Statistics page — move price chart and trade history there
+Create a dedicated **Statistics** page consolidating read-only analytics that are currently scattered:
+- Price chart (currently on Portfolio page)
+- Trade history / fill log (currently on AutoTrader page)
+- Session P&L summary and daily metrics
+Remove these sections from their current pages; Portfolio page keeps account overview + order placement only.
+- New page module `pages/statistics_page.py` with `render(mt, trading_client, data_client, …)`
+- Register in sidebar nav
+
+### 69. Remove poll interval from AutoTrader entry form
+Poll interval is an infrastructure setting, not a per-trade parameter. Remove it from the AutoTrader entry form and make it configurable only in **⚙️ Settings** (persisted via `AT_POLL` env var). The value from settings is already passed as a default; the per-trade override just adds noise and inconsistency.
+- Remove `poll_interval` input from `autotrader_page.py` entry form
+- Ensure `TraderConfig` always receives the value from `env_get("AT_POLL", "5")`
+
+### 70. Set a meaningful take-profit trigger default
+The current default `tp_trigger_pct = 0.0` effectively disables take-profit. Set a default that makes economic sense for a trailing-stop strategy — e.g. **1.5 %** (sell half at +1.5 %, trail the remainder). Update:
+- `TraderConfig.tp_trigger_pct` default → `1.5`
+- `TraderConfig.tp_qty_fraction` default → `0.5` (sell half, trail rest)
+- `AT_TP_TRIGGER` env var and Settings page input
+- README and CHANGELOG
+
+---
+
 ## Reliability
 
 ### ~~1. Silent AutoTrader thread death~~ ✓ fixed in 0.29.0
