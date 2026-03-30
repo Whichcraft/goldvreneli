@@ -1,6 +1,6 @@
 # Goldvreneli Trading Dashboard
 
-![Version](https://img.shields.io/badge/version-0.17.0-blue)
+![Version](https://img.shields.io/badge/version-0.18.0-blue)
 
 A Streamlit-based trading dashboard supporting **Alpaca Paper and Live Trading** and **Interactive Brokers (IBKR)** via IB Gateway, with automated trailing-stop trading, technical scanning, portfolio automation, and offline backtesting.
 
@@ -228,6 +228,8 @@ Scans ~600 liquid US stocks, ETFs, and ADRs using daily Alpaca bars and pandas-t
 - 1-day, 5-day, 10-day, 20-day returns
 - SMA20 slope
 - ATR% penalty (discounts high-volatility names)
+
+**Live filter controls** — the **Filters** expander lets you adjust all hard-filter thresholds (min price, ADV, RSI range, volume multiplier, SMA20 tolerance, min 5d return) directly on the page without going to Settings. Click *Save as defaults* to persist the current values.
 
 **Historical mode** — tick "Historical date" to scan as of a past date using data up to that close.
 

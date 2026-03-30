@@ -299,7 +299,7 @@ Scans ~600 liquid US stocks, ETFs, and ADRs using daily bar data and technical i
 
 **Sending to AutoTrader** — select one or more rows in the results table, then click *Send N symbol(s) to AutoTrader*. Symbols are queued; configure and start each in turn.
 
-_Adjust filter thresholds in **⚙️ Settings → Scanner Filters**._
+Filter thresholds (RSI, price, ADV, volume, SMA20 tolerance, 5d return) are adjustable inline in the **Filters** expander on the Scanner page. Click *Save as defaults* to persist them to Settings.
 """)
 
     with st.expander("🧪 Backtest"):

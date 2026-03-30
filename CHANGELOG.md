@@ -8,6 +8,17 @@ All notable changes to this project will be documented here.
 
 ---
 
+## [0.18.0] — 2026-03-30
+
+### Added
+- Scanner page: filter controls are now editable inline — min price, ADV, RSI range, volume multiplier, SMA20 tolerance, and min 5d return can all be adjusted without leaving the page
+- "Save as defaults" button in the Filters expander persists current values to `.env` / Settings
+
+### Removed
+- Static "Active filters" read-only table replaced by the live controls above
+
+---
+
 ## [0.17.0] — 2026-03-30
 
 ### Added
