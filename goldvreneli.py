@@ -1196,11 +1196,12 @@ if broker == "Alpaca":
             st.session_state["_scan_market_prev"] = market_choice
 
         _default_all = len(_watchlist_valid) == 0
+        _market_label = {"🇺🇸 US": "US", "🌍 International": "International", "🌐 All": "All"}[market_choice]
         with st.expander(
-            f"Symbol list — {'full universe' if _default_all else f'{len(_watchlist_valid)} from watchlist'} ({len(_base_universe)} available)",
+            f"Symbol list — {f'{_market_label} universe' if _default_all else f'{len(_watchlist_valid)} from watchlist'} ({len(_base_universe)} available)",
             expanded=False,
         ):
-            sel_all = st.checkbox("Scan full universe", value=_default_all, key="scan_sel_all")
+            sel_all = st.checkbox(f"Scan full {_market_label} universe", value=_default_all, key="scan_sel_all")
             selected_syms = st.multiselect(
                 "Symbols to scan",
                 options=sorted(_base_universe),
