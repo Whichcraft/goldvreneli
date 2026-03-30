@@ -152,11 +152,13 @@ if page == "Settings":
         # ── Portfolio Mode defaults ────────────────────────────────────────────
         st.subheader("Portfolio Mode Defaults")
         pmc1, pmc2 = st.columns(2)
-        f_pm_slots   = pmc1.number_input("Target slots", min_value=1, max_value=20,
-                                          value=int(env_get("PM_TARGET_SLOTS", "10")))
-        f_pm_slot_pct = pmc2.number_input("% of equity per slot", min_value=1.0,
-                                           max_value=50.0, step=1.0,
-                                           value=float(env_get("PM_SLOT_PCT", "10.0")))
+        f_pm_slots     = pmc1.number_input("Target slots", min_value=1, max_value=20,
+                                            value=int(env_get("PM_TARGET_SLOTS", "10")))
+        f_pm_slot_pct  = pmc2.number_input("% of equity per slot", min_value=1.0,
+                                            max_value=50.0, step=1.0,
+                                            value=float(env_get("PM_SLOT_PCT", "10.0")))
+        f_pm_slot_dollar = st.number_input("Fixed $ per slot (0 = use % above)", min_value=0.0,
+                                            step=100.0, value=float(env_get("PM_SLOT_DOLLAR", "0")))
 
         st.divider()
         saved = st.form_submit_button("Save Settings", type="primary")
@@ -187,6 +189,7 @@ if page == "Settings":
             "SCAN_WATCHLIST":          f_scan_watchlist,
             "PM_TARGET_SLOTS":         str(f_pm_slots),
             "PM_SLOT_PCT":             str(f_pm_slot_pct),
+            "PM_SLOT_DOLLAR":          str(f_pm_slot_dollar),
         })
         # Clear cached clients so they reconnect with new keys
         clear_alpaca_cache()
@@ -880,13 +883,28 @@ if broker == "Alpaca":
         # ── Configuration ─────────────────────────────────────────────────
         with st.expander("Configuration", expanded=not pm_running):
             pmc1, pmc2 = st.columns(2)
-            pm_slots    = pmc1.number_input("Target slots", min_value=1, max_value=20,
-                                             value=int(env_get("PM_TARGET_SLOTS", "10")),
-                                             disabled=pm_running)
-            pm_slot_pct = pmc2.number_input("% of equity per slot", min_value=1.0,
-                                             max_value=50.0, step=1.0,
-                                             value=float(env_get("PM_SLOT_PCT", "10.0")),
-                                             disabled=pm_running)
+            pm_slots = pmc1.number_input("Target slots", min_value=1, max_value=20,
+                                          value=int(env_get("PM_TARGET_SLOTS", "10")),
+                                          disabled=pm_running)
+            pm_size_mode = pmc2.radio("Slot sizing", ["% of equity", "Fixed $ per slot"],
+                                      horizontal=True, disabled=pm_running)
+
+            if pm_size_mode == "Fixed $ per slot":
+                pm_slot_dollar = st.number_input(
+                    "$ per slot", min_value=100.0, step=100.0,
+                    value=float(env_get("PM_SLOT_DOLLAR", "3000")),
+                    disabled=pm_running,
+                    help="Fixed dollar amount invested in each position regardless of account size.",
+                )
+                pm_slot_pct = 0.0
+                st.caption(f"Total exposure: ~${pm_slot_dollar * pm_slots:,.0f} across {pm_slots} slots")
+            else:
+                pm_slot_pct = st.number_input(
+                    "% of equity per slot", min_value=1.0, max_value=50.0, step=1.0,
+                    value=float(env_get("PM_SLOT_PCT", "10.0")),
+                    disabled=pm_running,
+                )
+                pm_slot_dollar = 0.0
 
             pms1, pms2 = st.columns(2)
             pm_stop_mode = pms1.selectbox("Stop mode", ["PCT", "ATR"],
@@ -908,9 +926,7 @@ if broker == "Alpaca":
             )
 
         # ── Start / Stop ──────────────────────────────────────────────────
-        btn_col1, btn_col2, _ = st.columns([1, 1, 4])
-        if btn_col1.button("▶  Start", type="primary", disabled=pm_running):
-            # Clear any stale instance so we recreate with fresh settings
+        def _launch_pm(mode: str):
             st.session_state.pop("portfolio_manager", None)
             cfg = TraderConfig(
                 stop_mode     = StopMode.PCT if pm_stop_mode == "PCT" else StopMode.ATR,
@@ -927,13 +943,24 @@ if broker == "Alpaca":
                 alpaca_get_equity,
                 target_slots      = int(pm_slots),
                 slot_pct          = float(pm_slot_pct),
+                slot_dollar       = float(pm_slot_dollar),
                 trader_config     = cfg,
                 daily_loss_limit  = float(pm_loss_limit),
             )
-            pm.start()
+            if mode == "all":
+                pm.start_all()
+            else:
+                pm.start()
             st.rerun()
 
-        if btn_col2.button("⏹  Stop", disabled=not pm_running):
+        btn_col1, btn_col2, btn_col3, _ = st.columns([1.4, 1, 1, 2])
+        if btn_col1.button("▶ Start Sequential", type="primary", disabled=pm_running,
+                           help="Open positions one at a time; replace each on close."):
+            _launch_pm("sequential")
+        if btn_col2.button("▶ Start All", type="primary", disabled=pm_running,
+                           help="Open all slots simultaneously."):
+            _launch_pm("all")
+        if btn_col3.button("⏹  Stop", disabled=not pm_running):
             st.session_state["portfolio_manager"].stop()
             st.rerun()
 

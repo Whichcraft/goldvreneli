@@ -49,7 +49,8 @@ class PortfolioManager:
     get_bars_fn      : callable(symbol) -> DataFrame  (None if PCT stop only)
     get_equity_fn    : callable() -> float
     target_slots     : maximum simultaneous positions (default 10)
-    slot_pct         : % of equity per slot (default 10.0)
+    slot_pct         : % of equity per slot (default 10.0; ignored when slot_dollar > 0)
+    slot_dollar      : fixed $ amount per slot (0 = use slot_pct instead)
     trader_config    : TraderConfig applied to every position
     scan_filters     : scanner.ScanFilters instance (None = scanner defaults)
     daily_loss_limit : halt new entries after this cumulative loss ($, 0 = off)
@@ -65,6 +66,7 @@ class PortfolioManager:
         get_equity_fn:    Callable[[], float],
         target_slots:     int                    = 10,
         slot_pct:         float                  = 10.0,
+        slot_dollar:      float                  = 0.0,
         trader_config:    Optional[TraderConfig] = None,
         scan_filters                             = None,
         daily_loss_limit: float                  = 0.0,
@@ -74,6 +76,7 @@ class PortfolioManager:
         self._get_equity   = get_equity_fn
         self._target_slots = target_slots
         self._slot_pct     = slot_pct
+        self._slot_dollar  = slot_dollar   # if > 0 overrides slot_pct
         self._config       = trader_config or TraderConfig()
         self._scan_filters = scan_filters
 
@@ -95,13 +98,26 @@ class PortfolioManager:
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
+    def _slot_label(self) -> str:
+        if self._slot_dollar > 0:
+            return f"${self._slot_dollar:,.0f}/slot"
+        return f"{self._slot_pct:.0f}% of equity/slot"
+
     def start(self):
-        """Run initial scan and fill all empty slots in a background thread."""
+        """Run initial scan and fill all empty slots sequentially (one at a time)."""
         if self._running:
             return
         self._running = True
-        self._log(f"Started — {self._target_slots} slots, {self._slot_pct:.0f}% each")
+        self._log(f"Started (sequential) — {self._target_slots} slots, {self._slot_label()}")
         threading.Thread(target=self._fill_empty_slots, daemon=True).start()
+
+    def start_all(self):
+        """Run initial scan and open all empty slots simultaneously in parallel."""
+        if self._running:
+            return
+        self._running = True
+        self._log(f"Started (all at once) — {self._target_slots} slots, {self._slot_label()}")
+        threading.Thread(target=self._fill_empty_slots_parallel, daemon=True).start()
 
     def stop(self):
         """Stop portfolio manager (open positions remain on the broker)."""
@@ -212,9 +228,12 @@ class PortfolioManager:
             return
 
         try:
-            equity = self._get_equity()
-            price  = self._get_price(sym)
-            qty    = max(1, int(equity * self._slot_pct / 100.0 / price))
+            price = self._get_price(sym)
+            if self._slot_dollar > 0:
+                qty = max(1, int(self._slot_dollar / price))
+            else:
+                equity = self._get_equity()
+                qty    = max(1, int(equity * self._slot_pct / 100.0 / price))
         except Exception as e:
             self._log(f"Sizing error for {sym}: {e}", "ERROR")
             return
@@ -238,9 +257,20 @@ class PortfolioManager:
                 threading.Thread(target=self._open_one_slot, daemon=True).start()
 
     def _fill_empty_slots(self):
-        """Called once at startup: scan then open all empty slots."""
+        """Sequential startup: scan then open slots one by one."""
         self._rescan()
         for _ in range(self.open_slot_count()):
             if not self._running:
                 break
             self._open_one_slot()
+
+    def _fill_empty_slots_parallel(self):
+        """Parallel startup: scan once then open all empty slots simultaneously."""
+        self._rescan()
+        n = self.open_slot_count()
+        threads = [
+            threading.Thread(target=self._open_one_slot, daemon=True)
+            for _ in range(n)
+        ]
+        for t in threads:
+            t.start()
