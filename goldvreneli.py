@@ -18,7 +18,7 @@ from autotrader import (
     StopMode, EntryMode, size_from_risk,
 )
 from replay import ReplayPriceFeed, SyntheticPriceFeed, MockBroker, load_sessions
-from scanner import scan, ScanFilters, UNIVERSE, UNIVERSE_US, UNIVERSE_INTL
+from scanner import scan, ScanFilters, UNIVERSE, UNIVERSE_US, UNIVERSE_INTL, UNIVERSE_INTL_FULL
 
 # ── Config ────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title=f"Goldvreneli Trading v{__version__}", layout="wide")
@@ -939,7 +939,7 @@ if broker == "Alpaca":
             if pm_size_mode == "Fixed $ per slot":
                 pm_slot_dollar = st.number_input(
                     "$ per slot", min_value=100.0, step=100.0,
-                    value=float(env_get("PM_SLOT_DOLLAR", "3000")),
+                    value=max(100.0, float(env_get("PM_SLOT_DOLLAR", "3000"))),
                     disabled=pm_running,
                     help="Fixed dollar amount invested in each position regardless of account size.",
                 )
@@ -1164,16 +1164,18 @@ if broker == "Alpaca":
         # ── Market selector ────────────────────────────────────────────────────
         market_choice = st.radio(
             "Market",
-            ["🇺🇸 US", "🌍 International", "🌐 All"],
+            ["🇺🇸 US", "🌍 INTL (small)", "🌍 INTL (full)", "🌐 All"],
             horizontal=True,
             index=0,
             key="scan_market",
-            help="🇺🇸 US: ~500 US equities and ETFs  |  🌍 International: foreign ADRs and country ETFs  |  🌐 All: full combined universe",
+            help="🇺🇸 US: ~500 US equities and ETFs  |  🌍 INTL (small): flagship ADRs + broad country ETFs (~60)  |  🌍 INTL (full): comprehensive international ADRs (~120)  |  🌐 All: full combined universe",
         )
         if market_choice == "🇺🇸 US":
             _base_universe = UNIVERSE_US
-        elif market_choice == "🌍 International":
+        elif market_choice == "🌍 INTL (small)":
             _base_universe = UNIVERSE_INTL
+        elif market_choice == "🌍 INTL (full)":
+            _base_universe = UNIVERSE_INTL_FULL
         else:
             _base_universe = UNIVERSE
 
@@ -1196,7 +1198,7 @@ if broker == "Alpaca":
             st.session_state["_scan_market_prev"] = market_choice
 
         _default_all = len(_watchlist_valid) == 0
-        _market_label = {"🇺🇸 US": "US", "🌍 International": "International", "🌐 All": "All"}[market_choice]
+        _market_label = {"🇺🇸 US": "US", "🌍 INTL (small)": "INTL (small)", "🌍 INTL (full)": "INTL (full)", "🌐 All": "All"}[market_choice]
         with st.expander(
             f"Symbol list — {f'{_market_label} universe' if _default_all else f'{len(_watchlist_valid)} from watchlist'} ({len(_base_universe)} available)",
             expanded=False,
@@ -1318,7 +1320,7 @@ if broker == "Alpaca":
                 qi1, qi2, qi3 = st.columns(3)
                 qi_dollar = qi1.number_input(
                     "$ per position", min_value=100.0, step=100.0,
-                    value=float(env_get("PM_SLOT_DOLLAR", "3000")),
+                    value=max(100.0, float(env_get("PM_SLOT_DOLLAR", "3000"))),
                     key="qi_dollar",
                 )
                 qi_stop = qi2.number_input(
