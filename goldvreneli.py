@@ -566,34 +566,68 @@ if broker == "Alpaca":
         st.divider()
 
         st.subheader("Open Positions")
-        positions = trading_client.get_all_positions()
-        if positions:
-            pos_data = [{
-                "Symbol":       p.symbol,
-                "Qty":          float(p.qty),
-                "Avg Entry":    f"${float(p.avg_entry_price):.2f}",
-                "Current":      f"${float(p.current_price):.2f}",
-                "Market Value": f"${float(p.market_value):,.2f}",
-                "P&L ($)":      f"${float(p.unrealized_pl):,.2f}",
-                "P&L (%)":      f"{float(p.unrealized_plpc)*100:.2f}%",
-                "Side":         p.side.value,
-            } for p in positions]
-            st.dataframe(pd.DataFrame(pos_data), width="stretch", hide_index=True)
 
-            fig = go.Figure(go.Bar(
-                x=[p.symbol for p in positions],
-                y=[float(p.unrealized_pl) for p in positions],
-                marker_color=["green" if float(p.unrealized_pl) >= 0 else "red" for p in positions],
-                text=[f"${float(p.unrealized_pl):,.2f}" for p in positions],
-                textposition="outside",
-            ))
-            fig.update_layout(title="Unrealized P&L by Position", yaxis_title="P&L ($)", height=350)
-            st.plotly_chart(fig, width="stretch")
-        else:
-            st.info(
-                "No open positions. "
-                "Go to **🔍 Scanner** to find the best stocks and invest with one click."
-            )
+        def _render_alpaca_positions(tc, label):
+            try:
+                pos = tc.get_all_positions()
+            except Exception as _e:
+                st.caption(f"{label}: could not fetch — {_e}")
+                return
+            st.caption(f"**{label}**")
+            if pos:
+                pos_data = [{
+                    "Symbol":       p.symbol,
+                    "Qty":          float(p.qty),
+                    "Avg Entry":    f"${float(p.avg_entry_price):.2f}",
+                    "Current":      f"${float(p.current_price):.2f}",
+                    "Market Value": f"${float(p.market_value):,.2f}",
+                    "P&L ($)":      f"${float(p.unrealized_pl):,.2f}",
+                    "P&L (%)":      f"{float(p.unrealized_plpc)*100:.2f}%",
+                    "Side":         p.side.value,
+                } for p in pos]
+                st.dataframe(pd.DataFrame(pos_data), use_container_width=True, hide_index=True)
+                fig = go.Figure(go.Bar(
+                    x=[p.symbol for p in pos],
+                    y=[float(p.unrealized_pl) for p in pos],
+                    marker_color=["green" if float(p.unrealized_pl) >= 0 else "red" for p in pos],
+                    text=[f"${float(p.unrealized_pl):,.2f}" for p in pos],
+                    textposition="outside",
+                ))
+                fig.update_layout(title=f"Unrealized P&L — {label}", yaxis_title="P&L ($)", height=300)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info(f"No open positions in {label}. Go to **🔍 Scanner** to find the best stocks and invest with one click.")
+
+        # Current Alpaca account
+        _render_alpaca_positions(trading_client, f"Alpaca {_mode_label}")
+
+        # Other Alpaca account (if keys configured)
+        _other_key    = env_get("ALPACA_LIVE_API_KEY"    if not alpaca_is_live else "ALPACA_PAPER_API_KEY")
+        _other_secret = env_get("ALPACA_LIVE_SECRET_KEY" if not alpaca_is_live else "ALPACA_PAPER_SECRET_KEY")
+        if _other_key and _other_secret:
+            try:
+                _other_tc, _ = get_alpaca_clients(_other_key, _other_secret, paper=alpaca_is_live)
+                _render_alpaca_positions(_other_tc, f"Alpaca {'Paper' if alpaca_is_live else 'Live'}")
+            except Exception:
+                pass
+
+        # IBKR positions if connected
+        try:
+            _ib = _get_ib()
+            if _ib and _ib.isConnected():
+                _ib_pos = _ib.positions()
+                st.caption("**IBKR**")
+                if _ib_pos:
+                    st.dataframe(pd.DataFrame([{
+                        "Symbol":   p.contract.symbol,
+                        "SecType":  p.contract.secType,
+                        "Qty":      p.position,
+                        "Avg Cost": f"${p.avgCost:.2f}",
+                    } for p in _ib_pos]), use_container_width=True, hide_index=True)
+                else:
+                    st.info("No open positions in IBKR.")
+        except Exception:
+            pass
 
         st.divider()
 
