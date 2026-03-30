@@ -89,6 +89,7 @@ class PortfolioManager:
         self._candidates:     List[str]             = []
         self._candidates_ts:  Optional[datetime]    = None
         self._lock            = threading.Lock()
+        self._scan_lock       = threading.Lock()   # prevents concurrent rescans
         self._log_entries:    List[Dict]            = []
         self._session_pnl:    float                 = 0.0
 
@@ -153,9 +154,16 @@ class PortfolioManager:
         logger.info("[PortfolioMgr] %s", msg)
 
     def _rescan(self) -> List[str]:
-        from scanner import scan
-        self._log("Scanning for candidates…")
+        if not self._scan_lock.acquire(blocking=False):
+            # Another scan is already in progress; wait for it to finish then
+            # return whatever candidates it populated.
+            with self._scan_lock:
+                pass
+            with self._lock:
+                return list(self._candidates)
         try:
+            from scanner import scan
+            self._log("Scanning for candidates…")
             df = scan(
                 self._data_client,
                 top_n=max(50, self._target_slots * 5),
@@ -170,6 +178,8 @@ class PortfolioManager:
         except Exception as e:
             self._log(f"Scan failed: {e}", "ERROR")
             return []
+        finally:
+            self._scan_lock.release()
 
     def _candidates_stale(self) -> bool:
         with self._lock:
@@ -230,7 +240,7 @@ class PortfolioManager:
     def _fill_empty_slots(self):
         """Called once at startup: scan then open all empty slots."""
         self._rescan()
-        for _ in range(self._target_slots):
+        for _ in range(self.open_slot_count()):
             if not self._running:
                 break
             self._open_one_slot()

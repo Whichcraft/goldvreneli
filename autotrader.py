@@ -23,6 +23,7 @@ Multi-position management:
                 optional daily loss limit.
 """
 
+import dataclasses
 import logging
 import threading
 import time
@@ -119,6 +120,7 @@ class AutoTraderStatus:
     # Take-profit
     tp_price:       float = 0.0
     tp_executed:    bool  = False
+    realized_pnl:   float = 0.0   # cumulative P&L from partial exits (e.g. take-profit)
 
     # Breakeven
     breakeven_active: bool = False
@@ -249,6 +251,10 @@ class AutoTrader:
                 stop_value    = threshold_pct if threshold_pct is not None else self._default_threshold,
                 poll_interval = poll_interval if poll_interval is not None else self._default_poll,
             )
+        else:
+            # Always work on a private copy so mutations in _run() (e.g. disabling
+            # take-profit after it fires) never affect the caller's TraderConfig.
+            config = dataclasses.replace(config)
 
         if config.stop_mode == StopMode.ATR and self._get_bars is None:
             raise ValueError("ATR stop mode requires a get_bars callable.")
@@ -442,7 +448,7 @@ class AutoTrader:
             try:
                 price = self._get_price(s.symbol)
                 s.current_price = price
-                s.pnl           = (price - s.entry_price) * s.qty_remaining
+                s.pnl           = (price - s.entry_price) * s.qty_remaining + s.realized_pnl
 
                 # New peak
                 if price > s.peak_price:
@@ -472,10 +478,11 @@ class AutoTrader:
                     s.qty_remaining -= sell_qty
                     s.tp_executed    = True
                     tp_pnl           = (price - s.entry_price) * sell_qty
+                    s.realized_pnl  += tp_pnl
                     self._log("TAKE_PROFIT", price,
                               f"Take-profit @ ${price:.2f} | sold {sell_qty} shares | partial P&L ${tp_pnl:.2f}")
                     if s.qty_remaining <= 0:
-                        s.pnl   = tp_pnl
+                        s.pnl   = s.realized_pnl   # all shares exited via TP
                         s.state = TraderState.SOLD
                         if self._on_close:
                             self._on_close(s.pnl)
@@ -656,11 +663,15 @@ class MultiTrader:
         logs.sort(key=lambda e: e.timestamp)
         return logs
 
-    def daily_pnl(self) -> float:
-        """Sum of current unrealized P&L across all watching positions."""
+    def unrealized_pnl(self) -> float:
+        """Sum of current unrealized P&L across all active positions."""
         with self._loss_lock:
             return sum(at.status.pnl for at in self._traders.values()
-                       if at.status.state == TraderState.WATCHING)
+                       if at.status.state in (TraderState.ENTERING, TraderState.WATCHING))
+
+    def daily_pnl(self) -> float:
+        """Deprecated alias for unrealized_pnl()."""
+        return self.unrealized_pnl()
 
     def realized_losses(self) -> float:
         """Cumulative realized losses today (positive number)."""
