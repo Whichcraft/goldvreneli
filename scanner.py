@@ -172,7 +172,7 @@ UNIVERSE_US = [
     "UUP", "FXE", "FXY", "FXB",
 ]
 
-# ── International universe — foreign ADRs and country/regional ETFs ────────────
+# ── International universe (small) — flagship ADRs + broad country ETFs ───────
 UNIVERSE_INTL = [
     # Semiconductors (foreign)
     "ASML", "TSM", "STM",
@@ -199,15 +199,63 @@ UNIVERSE_INTL = [
     "BHP", "RIO", "VALE",                  # Australia, UK, Brazil
     # Transport (foreign)
     "CNI", "CP",                           # Canada
-    # International / regional ETFs
+    # International / regional ETFs (broad)
     "EFA", "EEM", "VEA", "VWO", "IEFA", "IEMG",
     "EWJ", "EWZ", "EWC", "EWG", "EWU", "EWA", "EWH", "EWY", "EWT",
     "FXI", "MCHI", "KWEB", "CQQQ",
     "INDA", "INDY", "EPI",
 ]
 
-# Combined universe (backward-compatible)
-UNIVERSE = list(dict.fromkeys(UNIVERSE_US + UNIVERSE_INTL))
+# ── International universe (full) — comprehensive ADRs across all regions ──────
+UNIVERSE_INTL_FULL = UNIVERSE_INTL + [
+    # Europe — industrials / diversified
+    "ABB",                                 # Switzerland — automation & electrification
+    "ERIC", "NOK",                         # Sweden, Finland — telecom equipment
+    "PHG",                                 # Netherlands — health tech
+    "MT",                                  # Luxembourg — steel
+    "FERG", "CRH",                         # UK/Ireland — building products
+    # Europe — financials
+    "UBS", "CS",                           # Switzerland — banking
+    "ING", "AEG",                          # Netherlands — banking, insurance
+    "BCS", "LYG", "NWG",                   # UK — banking
+    "DB",                                  # Germany — banking
+    "KB", "SHG",                           # Korea — banking
+    # Europe — healthcare / pharma
+    "NVS",                                 # Switzerland — pharma (Novartis)
+    "TAK",                                 # Japan — pharma (Takeda)
+    # Europe — telecom
+    "VOD", "TEF", "ORAN",                  # UK, Spain, France
+    # Europe — consumer
+    "UL",                                  # UK/Netherlands — consumer goods (Unilever)
+    "PSO",                                 # UK — education/media (Pearson)
+    # Asia — China
+    "BABA", "VIPS", "YUMC",               # e-commerce, Yum China
+    "TAL", "EDU",                          # education
+    # Asia — Japan
+    "CAJ",                                 # Canon
+    "SMFG", "MFG",                         # Sumitomo Mitsui, Mizuho
+    # Asia — Korea
+    "SKM", "KEP",                          # SK Telecom, Korea Electric Power
+    # Asia — India
+    "INFY", "WIT",                         # Infosys, Wipro — IT services
+    "HDB", "IBN",                          # HDFC Bank, ICICI Bank
+    # Canada — energy & materials
+    "SU", "CNQ", "ENB", "TRP",            # oil sands, pipelines
+    "GOLD",                                # Barrick Gold
+    # Australia / other
+    "WDS",                                 # Woodside Energy (Australia)
+    # Country / regional ETFs — extended
+    "EWW", "EWS", "EWP", "EWQ", "EWL",   # Mexico, Singapore, Spain, France, Switzerland
+    "EWI", "EWN", "EWD", "EWO", "EWK",   # Italy, Netherlands, Sweden, Austria, Belgium
+    "EZA", "THD", "EWM",                  # South Africa, Thailand, Malaysia
+    "ARGT", "ECH", "EPU",                 # Argentina, Chile, Peru
+    "NORW", "EDEN",                        # Norway, Denmark
+    "GXC",                                 # China large-cap broad
+]
+UNIVERSE_INTL_FULL = list(dict.fromkeys(UNIVERSE_INTL_FULL))
+
+# Combined universe — US + full international
+UNIVERSE = list(dict.fromkeys(UNIVERSE_US + UNIVERSE_INTL_FULL))
 
 
 def fetch_bars(data_client, symbol: str, days: int = 90,
@@ -354,7 +402,7 @@ def _batch_fetch(data_client, syms: list, days: int = 90,
 
 def scan(data_client, top_n: int = 10, progress_cb=None,
          as_of: Optional[datetime] = None,
-         chunk_size: int = 100,
+         chunk_size: int = 250,
          filters: Optional[ScanFilters] = None,
          symbols: Optional[list] = None) -> pd.DataFrame:
     """
@@ -377,15 +425,18 @@ def scan(data_client, top_n: int = 10, progress_cb=None,
         spy_rets["5d"]  = (c.iloc[-1] / c.iloc[-6]  - 1) * 100 if len(c) > 6  else 0
         spy_rets["20d"] = (c.iloc[-1] / c.iloc[-21] - 1) * 100 if len(c) > 21 else 0
 
-    # ── Batch fetch in chunks ──────────────────────────────────────────────
+    # ── Batch fetch in parallel chunks ────────────────────────────────────
     bars_map: Dict[str, pd.DataFrame] = {}
     chunks = [symbols[i:i + chunk_size] for i in range(0, len(symbols), chunk_size)]
     done = 0
-    for chunk in chunks:
-        bars_map.update(_batch_fetch(data_client, chunk, 90, as_of))
-        done += len(chunk)
-        if progress_cb:
-            progress_cb(min(done, total), total)
+    with ThreadPoolExecutor(max_workers=min(len(chunks), 4)) as ex:
+        futs = {ex.submit(_batch_fetch, data_client, chunk, 90, as_of): len(chunk)
+                for chunk in chunks}
+        for fut in as_completed(futs):
+            bars_map.update(fut.result())
+            done += futs[fut]
+            if progress_cb:
+                progress_cb(min(done, total), total)
 
     # ── Score ──────────────────────────────────────────────────────────────
     results = []

@@ -8,6 +8,13 @@ All notable changes to this project will be documented here.
 
 ---
 
+## [0.25.1] — 2026-03-30
+
+### Fixed
+- Scanner: chunk fetches are now parallelised with `ThreadPoolExecutor(max_workers=4)` instead of sequential — ~4× faster for large universes; default `chunk_size` raised from 100 → 250 (fewer round-trips for ~720-symbol All universe)
+
+---
+
 ## [0.25.0] — 2026-03-30
 
 ### Added
