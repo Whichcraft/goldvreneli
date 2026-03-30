@@ -89,6 +89,20 @@ class TraderConfig:
     # Hard max-loss guard (absolute, from entry — catches gap-downs that blow past the trailing stop)
     max_loss_pct:          float     = 0.0   # 0 = disabled; e.g. 5.0 = exit if down ≥ 5 % from entry
 
+    def __post_init__(self):
+        if self.stop_value <= 0:
+            raise ValueError(f"stop_value must be > 0, got {self.stop_value}")
+        if self.poll_interval <= 0:
+            raise ValueError(f"poll_interval must be > 0, got {self.poll_interval}")
+        if self.scale_tranches < 1:
+            raise ValueError(f"scale_tranches must be >= 1, got {self.scale_tranches}")
+        if not (0.0 < self.tp_qty_fraction <= 1.0):
+            raise ValueError(f"tp_qty_fraction must be in (0, 1], got {self.tp_qty_fraction}")
+        if self.max_loss_pct < 0:
+            raise ValueError(f"max_loss_pct must be >= 0 (0 = disabled), got {self.max_loss_pct}")
+        if self.limit_timeout_s <= 0:
+            raise ValueError(f"limit_timeout_s must be > 0, got {self.limit_timeout_s}")
+
 
 @dataclass
 class TradeLog:
@@ -135,6 +149,7 @@ class AutoTraderStatus:
     # Config snapshot and timing
     config:         TraderConfig        = field(default_factory=TraderConfig)
     entry_time:     Optional[datetime]  = None
+    last_poll_at:   Optional[datetime]  = None   # updated every price fetch; None = not yet polled
     log:            List[TradeLog]      = field(default_factory=list)
 
 
@@ -379,9 +394,17 @@ class AutoTrader:
             tranche_qty = base + (rem if i == 0 else 0)
             if tranche_qty <= 0:
                 continue
-            price = self._get_price(self.status.symbol)
-            self.status.current_price = price
-            self._place_buy(self.status.symbol, tranche_qty)
+            try:
+                price = self._get_price(self.status.symbol)
+                self.status.current_price = price
+                self._place_buy(self.status.symbol, tranche_qty)
+            except Exception as exc:
+                self._log("ERROR", 0.0,
+                          f"Tranche {i + 1}/{n} buy failed ({exc})"
+                          + (f" — proceeding with {total_filled} shares already filled"
+                             if total_filled > 0 else " — no shares filled"))
+                logger.warning(f"Scale entry tranche {i + 1} failed for {self.status.symbol}: {exc}")
+                break
             total_cost   += price * tranche_qty
             total_filled += tranche_qty
             self.status.tranches_filled = i + 1
@@ -519,6 +542,7 @@ class AutoTrader:
         while not self._stop_event.is_set():
             try:
                 price = self._get_price(s.symbol)
+                s.last_poll_at  = datetime.now()
                 s.current_price = price
                 s.pnl           = (price - s.entry_price) * s.qty_remaining + s.realized_pnl
 

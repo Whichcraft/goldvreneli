@@ -172,8 +172,122 @@ UNIVERSE_US = [
     "UUP", "FXE", "FXY", "FXB",
 ]
 
+# ── Swiss universe — ADRs + US-listed Swiss equities ──────────────────────────
+UNIVERSE_CH = [
+    # ── NYSE / NASDAQ directly listed ─────────────────────────────────────────
+    "NVS",    # Novartis AG — pharma
+    "ABB",    # ABB Ltd — automation & electrification
+    "UBS",    # UBS Group AG — banking
+    "ONON",   # On Holding AG — running apparel / footwear
+    "LOGI",   # Logitech International — tech peripherals
+    "ALC",    # Alcon Inc — eye care (spun off from Novartis, NYSE)
+    "SDZ",    # Sandoz Group AG — generics / biosimilars (spun off from Novartis, NYSE)
+    # ── OTC ADRs — mega / large cap ───────────────────────────────────────────
+    "NSRGY",  # Nestlé SA — consumer staples
+    "RHHBY",  # Roche Holding AG — pharma & diagnostics
+    "CFRUY",  # Compagnie Financière Richemont — luxury goods
+    "LZAGY",  # Lonza Group AG — pharma ingredients / CDMO
+    "SXYAY",  # Sika AG — specialty chemicals / construction
+    "ZURVY",  # Zurich Insurance Group — insurance
+    "HCMLY",  # Holcim Ltd — building materials (cement)
+    "SSREY",  # Swiss Re AG — reinsurance
+    "GVDNY",  # Givaudan SA — flavors & fragrances
+    "AHEXY",  # Adecco Group AG — staffing / HR solutions
+    "KHNGY",  # Kuehne+Nagel International AG — logistics
+    "JBAXY",  # Julius Baer Group Ltd — wealth management
+    "SZLMY",  # Swiss Life Holding AG — life insurance / asset management
+    "SONVY",  # Sonova Holding AG — hearing solutions
+    "SCMWY",  # Swisscom AG — telecom
+    "SGSOY",  # SGS SA — testing, inspection, certification
+    "PGPHF",  # Partners Group Holding AG — private markets asset manager
+    "GVDNY",  # Givaudan SA (already above — de-dup handled by dict.fromkeys)
+    # ── OTC ADRs — mid cap ────────────────────────────────────────────────────
+    "HVTHY",  # Helvetia Holding AG — insurance
+    "BLHEY",  # Baloise Holding AG — insurance
+    "TMSNY",  # Temenos AG — banking software
+    "CLZNY",  # Clariant AG — specialty chemicals
+    "SAUHF",  # Straumann Holding AG — dental implants / oral health
+    "LNGSF",  # Chocoladefabriken Lindt & Sprüngli AG — chocolates
+    "GBERF",  # Geberit AG — sanitary products / piping systems
+    "EMCHY",  # EMS-Chemie Holding AG — high-performance polymers
+    "GFORY",  # Georg Fischer AG — piping systems / casting
+    "SHLAF",  # Schindler Holding AG — elevators & escalators
+    "VACAF",  # VAT Group AG — vacuum valves (semicon equipment)
+    "AMSSY",  # ams-OSRAM AG — optical semiconductors / sensors
+    "OERLF",  # OC Oerlikon Corporation AG — surface solutions / precision
+    "DRMKF",  # dormakaba Holding AG — access & security
+    "BRRLY",  # Barry Callebaut AG — bulk chocolate / cocoa
+    "LNGYY",  # Landis+Gyr Group AG — smart energy meters
+    "GLNCY",  # Glencore PLC — commodities / mining (SIX-listed, Swiss HQ)
+    "SULZF",  # Sulzer AG — pumps, rotating equipment, flow control
+    "SFBQF",  # SFS Group AG — precision components / fastening
+    "BUICF",  # Bucher Industries AG — specialized vehicles / machinery
+    "AVTXY",  # Avolta AG (formerly Dufry) — travel retail
+    "EFGIF",  # EFG International AG — private banking
+    # ── NYSE / NASDAQ — Swiss-incorporated / Swiss HQ ─────────────────────────
+    "GRMN",   # Garmin Ltd — GPS / navigation / wearables (Swiss incorporated)
+    "CB",     # Chubb Limited — property & casualty insurance (NYSE)
+    "TEL",    # TE Connectivity Ltd — connectors & sensors (NYSE)
+    "RIG",    # Transocean Ltd — offshore drilling (NYSE)
+    "WFRD",   # Weatherford International — oilfield services (NASDAQ)
+    # ── OTC ADRs — watches / consumer ────────────────────────────────────────
+    "SWGAY",  # Swatch Group AG — watches (ADR)
+    "LDSVF",  # Lindt & Sprüngli AG — bearer shares (complement to LNGSF)
+    "BRRLY",  # Barry Callebaut AG — bulk chocolate (already above, de-duped)
+    # ── OTC — technology / industrial ────────────────────────────────────────
+    "TCGNY",  # Tecan Group AG — lab automation instruments
+    "SNSNF",  # Sensirion Holding AG — environmental sensors
+    "UBLXF",  # u-blox Holding AG — positioning / wireless modules
+    "IFCNF",  # Inficon Holding AG — process control instruments
+    "COPMF",  # Comet Holding AG — X-ray / plasma technology
+    "LEMMF",  # LEM Holding SA — current & voltage measurement
+    "FEUSF",  # Feintool International Holding — precision stamping
+    "HUBSF",  # Huber+Suhner AG — RF connectors / fiber optics
+    "BELEF",  # Belimo Holding AG — HVAC actuators & valves
+    "IRLHF",  # Interroll Holding AG — material handling systems
+    "BCKDF",  # Burckhardt Compression Holding AG — compressors
+    "DTWLF",  # Dätwyler Holding AG — sealing / precision engineering
+    "AUTNF",  # Autoneum Holding AG — acoustic / thermal vehicle mgmt
+    "MTTAF",  # Montana Aerospace AG — aerospace components
+    "RIEOF",  # Rieter Holding AG — textile machinery
+    # ── OTC — pharma / medtech / biotech ─────────────────────────────────────
+    "MEDAF",  # Medartis Holding AG — orthopedic implants
+    "BBIOF",  # BB Biotech AG — biotech investment company
+    "SFZLF",  # Siegfried Holding AG — pharma CDMO
+    "GAENF",  # Galenica Holding AG — pharma distribution / retail
+    "YPSOF",  # Ypsomed Holding AG — drug delivery systems
+    # ── OTC — real estate ────────────────────────────────────────────────────
+    "SWPCF",  # Swiss Prime Site AG — commercial real estate
+    "PSPNF",  # PSP Swiss Property AG — commercial real estate
+    "MOBHF",  # Mobimo Holding AG — residential & commercial property
+    # ── OTC — financial / banking ────────────────────────────────────────────
+    "VNTBF",  # Vontobel Holding AG — wealth mgmt / structured products
+    "BCVVF",  # Banque Cantonale Vaudoise — cantonal bank
+    "VLHAF",  # Valiant Holding AG — cantonal / regional bank
+    "CMBNF",  # Cembra Money Bank AG — consumer finance / credit cards
+    "HBMHF",  # HBM Healthcare Investments AG — healthcare private equity
+    # ── OTC — industrials / specialty ────────────────────────────────────────
+    "SWONF",  # SoftwareOne Holding AG — IT software / services
+    "FOROF",  # Forbo Holding AG — flooring / power transmission belts
+    "ZEHNF",  # Zehnder Group AG — radiators / ventilation
+    "GFCOF",  # Gurit Holding AG — composite materials
+    "BSRDF",  # Bossard Holding AG — fastening systems / logistics
+    "MYBUF",  # Meyer Burger Technology AG — solar cell equipment
+    "FLUGF",  # Flughafen Zürich AG — airport operator
+    "ALSOF",  # ALSO Holding AG — IT wholesale distributor
+    "STLAF",  # Stadler Rail AG — rail vehicles
+    "EMMNF",  # Emmi Group AG — dairy / food
+    "TXGAF",  # TX Group AG — media & marketplaces
+    "GFCOF",  # Gurit (already above — de-dup)
+    # ── ETFs ──────────────────────────────────────────────────────────────────
+    "EWL",    # iShares MSCI Switzerland ETF
+    "HEWL",   # iShares Currency Hedged MSCI Switzerland ETF
+]
+# De-duplicate while preserving order
+UNIVERSE_CH = list(dict.fromkeys(UNIVERSE_CH))
+
 # ── International universe (small) — flagship ADRs + broad country ETFs ───────
-UNIVERSE_INTL = [
+UNIVERSE_INTL = list(dict.fromkeys(UNIVERSE_CH + [
     # Semiconductors (foreign)
     "ASML", "TSM", "STM",
     # Internet / E-commerce (foreign)
@@ -204,24 +318,21 @@ UNIVERSE_INTL = [
     "EWJ", "EWZ", "EWC", "EWG", "EWU", "EWA", "EWH", "EWY", "EWT",
     "FXI", "MCHI", "KWEB", "CQQQ",
     "INDA", "INDY", "EPI",
-]
+]))
 
 # ── International universe (full) — comprehensive ADRs across all regions ──────
 UNIVERSE_INTL_FULL = UNIVERSE_INTL + [
     # Europe — industrials / diversified
-    "ABB",                                 # Switzerland — automation & electrification
     "ERIC", "NOK",                         # Sweden, Finland — telecom equipment
     "PHG",                                 # Netherlands — health tech
     "MT",                                  # Luxembourg — steel
     "FERG", "CRH",                         # UK/Ireland — building products
     # Europe — financials
-    "UBS", "CS",                           # Switzerland — banking
     "ING", "AEG",                          # Netherlands — banking, insurance
     "BCS", "LYG", "NWG",                   # UK — banking
     "DB",                                  # Germany — banking
     "KB", "SHG",                           # Korea — banking
     # Europe — healthcare / pharma
-    "NVS",                                 # Switzerland — pharma (Novartis)
     "TAK",                                 # Japan — pharma (Takeda)
     # Europe — telecom
     "VOD", "TEF", "ORAN",                  # UK, Spain, France
@@ -245,7 +356,7 @@ UNIVERSE_INTL_FULL = UNIVERSE_INTL + [
     # Australia / other
     "WDS",                                 # Woodside Energy (Australia)
     # Country / regional ETFs — extended
-    "EWW", "EWS", "EWP", "EWQ", "EWL",   # Mexico, Singapore, Spain, France, Switzerland
+    "EWW", "EWS", "EWP", "EWQ",            # Mexico, Singapore, Spain, France
     "EWI", "EWN", "EWD", "EWO", "EWK",   # Italy, Netherlands, Sweden, Austria, Belgium
     "EZA", "THD", "EWM",                  # South Africa, Thailand, Malaysia
     "ARGT", "ECH", "EPU",                 # Argentina, Chile, Peru
@@ -404,9 +515,16 @@ def scan(data_client, top_n: int = 10, progress_cb=None,
          as_of: Optional[datetime] = None,
          chunk_size: int = 250,
          filters: Optional[ScanFilters] = None,
-         symbols: Optional[list] = None) -> pd.DataFrame:
+         symbols: Optional[list] = None):
     """
     Scan symbols, apply filters, return top_n candidates sorted by score.
+
+    Returns
+    -------
+    (df, skipped_history, skipped_no_data)
+      df               : DataFrame of scored results
+      skipped_history  : symbols fetched but with < 52 bars
+      skipped_no_data  : symbols for which no bars could be fetched at all
 
     progress_cb : optional callable(done, total) for progress updates
     as_of       : if set, fetch bars ending on this date (historical mode)
@@ -441,6 +559,7 @@ def scan(data_client, top_n: int = 10, progress_cb=None,
     # ── Score ──────────────────────────────────────────────────────────────
     results = []
     skipped_history = 0
+    skipped_no_data = total - len(bars_map)   # symbols for which fetch returned nothing
     for sym, bars in bars_map.items():
         if len(bars) < 52:
             skipped_history += 1
@@ -451,10 +570,10 @@ def scan(data_client, top_n: int = 10, progress_cb=None,
             results.append(scored)
 
     if not results:
-        return pd.DataFrame(), skipped_history
+        return pd.DataFrame(), skipped_history, skipped_no_data
 
     df = pd.DataFrame(results)
     df = df.sort_values("_score", ascending=False).head(top_n)
     df = df.drop(columns=["_score"])
     df = df.set_index("Symbol")
-    return df, skipped_history
+    return df, skipped_history, skipped_no_data

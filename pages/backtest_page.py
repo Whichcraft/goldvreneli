@@ -283,6 +283,19 @@ def render(data_client, broker):
             })
         st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
+        # ── CSV export ────────────────────────────────────────────────────────
+        all_fills = []
+        for s in sessions:
+            sym = s.get("meta", {}).get("symbol", "")
+            for f in s.get("fills", []):
+                all_fills.append({**f, "symbol": f.get("symbol") or sym,
+                                  "session_id": s.get("id"),
+                                  "session_pnl": s.get("pnl")})
+        if all_fills:
+            csv_bytes = pd.DataFrame(all_fills).to_csv(index=False).encode()
+            st.download_button("⬇ Download fills CSV", data=csv_bytes,
+                               file_name="backtest_fills.csv", mime="text/csv")
+
         # Expandable fills per session
         for s in sessions[:5]:   # show last 5
             fills = s.get("fills", [])

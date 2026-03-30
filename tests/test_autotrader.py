@@ -10,6 +10,7 @@ import pandas as pd
 
 from autotrader import (
     AutoTrader,
+    MultiTrader,
     TraderConfig,
     TraderState,
     StopMode,
@@ -17,7 +18,7 @@ from autotrader import (
     size_from_risk,
     _calc_atr,
 )
-from replay import SyntheticPriceFeed, MockBroker
+from replay import SyntheticPriceFeed, MockBroker, ReplayPriceFeed
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -392,3 +393,380 @@ class TestAutoTraderLifecycle:
         if at.status.breakeven_active:
             assert at.status.stop_floor >= at.status.entry_price
         at.stop()
+
+
+# ── TraderConfig validation ───────────────────────────────────────────────────
+
+class TestTraderConfigValidation:
+    def test_zero_stop_value_raises(self):
+        with pytest.raises(ValueError, match="stop_value"):
+            TraderConfig(stop_value=0.0)
+
+    def test_negative_stop_value_raises(self):
+        with pytest.raises(ValueError, match="stop_value"):
+            TraderConfig(stop_value=-1.0)
+
+    def test_zero_poll_interval_raises(self):
+        with pytest.raises(ValueError, match="poll_interval"):
+            TraderConfig(poll_interval=0.0)
+
+    def test_zero_scale_tranches_raises(self):
+        with pytest.raises(ValueError, match="scale_tranches"):
+            TraderConfig(scale_tranches=0)
+
+    def test_tp_fraction_above_one_raises(self):
+        with pytest.raises(ValueError, match="tp_qty_fraction"):
+            TraderConfig(tp_qty_fraction=1.5)
+
+    def test_tp_fraction_zero_raises(self):
+        with pytest.raises(ValueError, match="tp_qty_fraction"):
+            TraderConfig(tp_qty_fraction=0.0)
+
+    def test_negative_max_loss_raises(self):
+        with pytest.raises(ValueError, match="max_loss_pct"):
+            TraderConfig(max_loss_pct=-1.0)
+
+    def test_valid_config_ok(self):
+        cfg = TraderConfig(stop_value=0.5, poll_interval=1.0, tp_qty_fraction=0.5,
+                           max_loss_pct=5.0)
+        assert cfg.stop_value == 0.5
+
+    def test_zero_max_loss_ok(self):
+        # 0.0 means disabled — should not raise
+        cfg = TraderConfig(max_loss_pct=0.0)
+        assert cfg.max_loss_pct == 0.0
+
+
+# ── Scale entry ───────────────────────────────────────────────────────────────
+
+class TestScaleEntry:
+    def _make_at(self, tmp_path, prices):
+        """AutoTrader wired to a list of deterministic prices."""
+        it      = iter(prices)
+        def get_price(sym): return next(it, prices[-1])
+        buys    = []
+        sells   = []
+        at = AutoTrader(
+            get_price  = get_price,
+            place_buy  = lambda s, q: buys.append((s, q)),
+            place_sell = lambda s, q: sells.append((s, q)),
+        )
+        at._on_close = lambda pnl: None
+        return at, buys, sells
+
+    def test_scale_average_entry_price(self, tmp_path):
+        """3-tranche scale: entry_price == weighted average of fill prices."""
+        # Prices: 3 for entry polls, then high enough that trailing stop never fires
+        prices = [100.0, 102.0, 104.0] + [200.0] * 100
+        at, buys, _ = self._make_at(tmp_path, prices)
+        cfg = TraderConfig(
+            stop_value=99.0,       # very wide — won't fire
+            entry_mode=EntryMode.SCALE,
+            scale_tranches=3,
+            scale_interval_s=0.0,
+            poll_interval=0.01,
+        )
+        at.start("AAA", 9, config=cfg)
+        wait_for_state(at, TraderState.WATCHING, timeout=5)
+        # 9 shares across 3 tranches = 3 each (3+3+3)
+        buy_qtys = [q for _, q in buys]
+        assert sum(buy_qtys) == 9
+        assert len(buy_qtys) == 3
+        expected_avg = (100.0 * 3 + 102.0 * 3 + 104.0 * 3) / 9
+        assert abs(at.status.entry_price - expected_avg) < 0.01
+        at.stop()
+
+    def test_scale_stop_fires_after_all_tranches(self, tmp_path):
+        """Stop must fire correctly after scale entry completes."""
+        # Buy at ~100, then drop sharply below stop
+        prices = [100.0, 100.0, 100.0] + [50.0] * 100
+        at, buys, sells = self._make_at(tmp_path, prices)
+        cfg = TraderConfig(
+            stop_value=0.5,
+            entry_mode=EntryMode.SCALE,
+            scale_tranches=2,
+            scale_interval_s=0.0,
+            poll_interval=0.01,
+        )
+        at.start("BBB", 2, config=cfg)
+        reached = wait_for_state(at, TraderState.SOLD, timeout=5)
+        assert reached, f"Stuck in {at.status.state}"
+        assert len(sells) >= 1
+
+    def test_scale_stop_mid_scale(self, tmp_path):
+        """Calling stop() during scale entry results in STOPPED, no dangling sell."""
+        prices = [100.0] * 1000
+        it      = iter(prices)
+        buys    = []
+        sells   = []
+        import threading
+        paused = threading.Event()
+
+        def slow_buy(s, q):
+            buys.append((s, q))
+            paused.wait(timeout=2)   # block after first tranche
+
+        at = AutoTrader(
+            get_price  = lambda sym: next(it, 100.0),
+            place_buy  = slow_buy,
+            place_sell = lambda s, q: sells.append((s, q)),
+        )
+        at._on_close = lambda pnl: None
+        cfg = TraderConfig(
+            stop_value=99.0,
+            entry_mode=EntryMode.SCALE,
+            scale_tranches=3,
+            scale_interval_s=0.0,
+            poll_interval=0.01,
+        )
+        at.start("CCC", 3, config=cfg)
+        time.sleep(0.05)        # let first tranche buy call happen
+        at.stop()
+        paused.set()            # unblock buy so thread can exit cleanly
+        wait_for_state(at, {TraderState.STOPPED, TraderState.SOLD, TraderState.ERROR}, timeout=3)
+        assert len(sells) == 0  # stop() should not place a sell
+
+
+# ── Partial take-profit ───────────────────────────────────────────────────────
+
+class TestPartialTakeProfit:
+    def test_partial_sell_and_remainder_trails(self, tmp_path):
+        """tp_qty_fraction=0.5: only half sold at take-profit; rest continues trailing."""
+        feed   = SyntheticPriceFeed(100.0, volatility_pct=0.1, drift_pct=5.0, seed=7)
+        sells  = []
+        buys   = []
+        at = AutoTrader(
+            get_price  = feed.get_price,
+            place_buy  = lambda s, q: buys.append(q),
+            place_sell = lambda s, q: sells.append(q),
+            poll_interval=0.01,
+        )
+        at._on_close = lambda pnl: None
+        cfg = TraderConfig(
+            stop_value=99.0,          # very wide trailing stop
+            tp_trigger_pct=0.5,       # trigger after 0.5% gain
+            tp_qty_fraction=0.5,      # sell half
+            poll_interval=0.01,
+        )
+        at.start("TP", 10, config=cfg)
+        # Wait for take-profit to execute
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            if at.status.tp_executed:
+                break
+            time.sleep(0.05)
+        assert at.status.tp_executed, "Take-profit did not execute"
+        # First sell should be exactly half of 10 shares
+        assert sells[0] == 5
+        # qty_remaining updated
+        assert at.status.qty_remaining == 5
+        at.stop()
+
+    def test_full_tp_fraction_closes_all(self, tmp_path):
+        """tp_qty_fraction=1.0 (default): position closes completely on take-profit."""
+        feed  = SyntheticPriceFeed(100.0, volatility_pct=0.1, drift_pct=5.0, seed=8)
+        sells = []
+        at = AutoTrader(
+            get_price  = feed.get_price,
+            place_buy  = lambda s, q: None,
+            place_sell = lambda s, q: sells.append(q),
+            poll_interval=0.01,
+        )
+        at._on_close = lambda pnl: None
+        cfg = TraderConfig(
+            stop_value=99.0,
+            tp_trigger_pct=0.5,
+            tp_qty_fraction=1.0,
+            poll_interval=0.01,
+        )
+        at.start("TP2", 4, config=cfg)
+        reached = wait_for_state(at, TraderState.SOLD, timeout=5)
+        assert reached
+        assert sum(sells) == 4
+
+
+# ── ATR stop full lifecycle ───────────────────────────────────────────────────
+
+class TestAtrStopLifecycle:
+    def test_atr_stop_fires(self, tmp_path):
+        """ATR stop must fire when price drops N×ATR below peak."""
+        # Fixed bars giving a known ATR (~1.0)
+        bars = make_bars(30, base=100.0, seed=1)
+        atr  = _calc_atr(bars)   # actual value, so we can size the drop
+
+        # Price feed: rises a bit then drops well past ATR stop
+        rise   = [100.0 + i * 0.5 for i in range(5)]   # up to ~102
+        peak   = rise[-1]
+        drop   = [peak - atr * 2 * (i + 1) for i in range(20)]  # drop hard
+        prices = rise + drop + [drop[-1]] * 50
+        it     = iter(prices)
+
+        sells = []
+        at = AutoTrader(
+            get_price  = lambda sym: next(it, prices[-1]),
+            place_buy  = lambda s, q: None,
+            place_sell = lambda s, q: sells.append((s, q)),
+            get_bars   = lambda sym: bars,
+        )
+        at._on_close = lambda pnl: None
+        cfg = TraderConfig(
+            stop_mode  = StopMode.ATR,
+            stop_value = 1.0,   # 1× ATR
+            poll_interval = 0.01,
+        )
+        at.start("ATR", 5, config=cfg)
+        reached = wait_for_state(at, TraderState.SOLD, timeout=5)
+        assert reached, f"ATR stop did not fire, state={at.status.state}"
+        assert len(sells) >= 1
+        assert at.status.atr_value > 0
+
+
+# ── MultiTrader ───────────────────────────────────────────────────────────────
+
+class TestMultiTrader:
+    def _make_mt(self, prices_by_sym=None, drift=0.0):
+        """MultiTrader backed by per-symbol SyntheticPriceFeeds."""
+        feeds: dict = {}
+        buys  = []
+        sells = []
+
+        def get_price(sym):
+            if sym not in feeds:
+                feeds[sym] = SyntheticPriceFeed(100.0, volatility_pct=0.1,
+                                                drift_pct=drift, seed=42)
+            return feeds[sym].get_price(sym)
+
+        mt = MultiTrader(
+            get_price  = get_price,
+            place_buy  = lambda s, q: buys.append((s, q)),
+            place_sell = lambda s, q: sells.append((s, q)),
+        )
+        return mt, buys, sells
+
+    def test_start_creates_active_trader(self):
+        mt, buys, _ = self._make_mt()
+        cfg = TraderConfig(stop_value=99.0, poll_interval=0.01)
+        mt.start("AAPL", 1, config=cfg)
+        wait_for_state(mt._traders["AAPL"], TraderState.WATCHING, timeout=3)
+        assert mt._traders["AAPL"].status.state == TraderState.WATCHING
+        mt.stop_all()
+
+    def test_duplicate_symbol_raises(self):
+        mt, _, _ = self._make_mt()
+        cfg = TraderConfig(stop_value=99.0, poll_interval=0.01)
+        mt.start("AAPL", 1, config=cfg)
+        wait_for_state(mt._traders["AAPL"], TraderState.WATCHING, timeout=3)
+        with pytest.raises(RuntimeError, match="already active"):
+            mt.start("AAPL", 1, config=cfg)
+        mt.stop_all()
+
+    def test_two_symbols_run_concurrently(self):
+        mt, buys, _ = self._make_mt()
+        cfg = TraderConfig(stop_value=99.0, poll_interval=0.01)
+        mt.start("AAPL", 1, config=cfg)
+        mt.start("MSFT", 1, config=cfg)
+        wait_for_state(mt._traders["AAPL"], TraderState.WATCHING, timeout=3)
+        wait_for_state(mt._traders["MSFT"], TraderState.WATCHING, timeout=3)
+        assert mt._traders["AAPL"].status.state == TraderState.WATCHING
+        assert mt._traders["MSFT"].status.state == TraderState.WATCHING
+        mt.stop_all()
+
+    def test_stop_all_halts_all_traders(self):
+        mt, _, _ = self._make_mt()
+        cfg = TraderConfig(stop_value=99.0, poll_interval=0.01)
+        mt.start("A", 1, config=cfg)
+        mt.start("B", 1, config=cfg)
+        for sym in ("A", "B"):
+            wait_for_state(mt._traders[sym], TraderState.WATCHING, timeout=3)
+        mt.stop_all()
+        time.sleep(0.1)
+        for sym in ("A", "B"):
+            assert mt._traders[sym].status.state in (
+                TraderState.STOPPED, TraderState.SOLD, TraderState.ERROR)
+
+    def test_daily_loss_limit_blocks_new_trades(self):
+        mt, _, _ = self._make_mt(drift=-50.0)  # strong drift down → quick loss
+        cfg = TraderConfig(stop_value=0.1, poll_interval=0.01)
+        mt._daily_loss_limit = 0.01   # tiny limit — easily exceeded
+        mt.start("X", 10, config=cfg)
+        reached = wait_for_state(mt._traders["X"], TraderState.SOLD, timeout=5)
+        assert reached
+        time.sleep(0.05)   # let _on_close update realized_loss
+        assert mt._realized_loss > 0
+        with pytest.raises(RuntimeError, match="Daily loss limit"):
+            mt.start("Y", 10, config=cfg)
+
+    def test_statuses_reflects_all_symbols(self):
+        mt, _, _ = self._make_mt()
+        cfg = TraderConfig(stop_value=99.0, poll_interval=0.01)
+        mt.start("P", 1, config=cfg)
+        mt.start("Q", 1, config=cfg)
+        for sym in ("P", "Q"):
+            wait_for_state(mt._traders[sym], TraderState.WATCHING, timeout=3)
+        s = mt.statuses()
+        assert "P" in s and "Q" in s
+        mt.stop_all()
+
+
+# ── ReplayPriceFeed ───────────────────────────────────────────────────────────
+
+class TestReplayPriceFeed:
+    """Tests for ReplayPriceFeed using monkeypatched _fetch to avoid API calls."""
+
+    def _make_feed(self, prices, speed=100.0, start_time=None, end_time=None):
+        """Build a ReplayPriceFeed with pre-loaded prices (no API call)."""
+        from datetime import time as dtime
+        feed = object.__new__(ReplayPriceFeed)
+        import threading
+        feed.symbol   = "TEST"
+        feed.speed    = speed
+        feed._prices  = list(prices)
+        feed._times   = [f"2024-01-02 09:{i:02d}:00" for i in range(len(prices))]
+        feed._idx     = 0
+        feed._lock    = threading.Lock()
+        return feed
+
+    def test_returns_prices_in_sequence(self):
+        feed = self._make_feed([10.0, 20.0, 30.0])
+        assert feed.get_price("X") == 10.0
+        assert feed.get_price("X") == 20.0
+        assert feed.get_price("X") == 30.0
+
+    def test_exhausted_after_last_bar(self):
+        feed = self._make_feed([1.0, 2.0])
+        feed.get_price("X")
+        feed.get_price("X")
+        assert feed.exhausted
+
+    def test_returns_last_price_when_exhausted(self):
+        feed = self._make_feed([5.0, 9.0])
+        feed.get_price("X")
+        feed.get_price("X")   # now exhausted
+        assert feed.get_price("X") == 9.0   # returns last, doesn't advance
+
+    def test_recommended_poll_interval(self):
+        feed = self._make_feed([1.0], speed=200.0)
+        assert abs(feed.recommended_poll_interval - 60.0 / 200.0) < 1e-9
+
+    def test_progress_fraction(self):
+        feed = self._make_feed([1.0, 2.0, 3.0, 4.0])
+        feed.get_price("X")
+        feed.get_price("X")
+        assert abs(feed.progress - 0.5) < 1e-9
+
+    def test_reset_restarts_sequence(self):
+        feed = self._make_feed([7.0, 8.0, 9.0])
+        feed.get_price("X")
+        feed.get_price("X")
+        feed.reset()
+        assert feed.get_price("X") == 7.0
+
+    def test_bar_count(self):
+        feed = self._make_feed([1.0] * 13)
+        assert feed.bar_count == 13
+
+    def test_current_bar_advances(self):
+        feed = self._make_feed([1.0, 2.0, 3.0])
+        assert feed.current_bar == 0
+        feed.get_price("X")
+        assert feed.current_bar == 1

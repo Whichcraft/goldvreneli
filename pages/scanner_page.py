@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime
 
-from scanner import scan, ScanFilters, UNIVERSE, UNIVERSE_US, UNIVERSE_INTL, UNIVERSE_INTL_FULL
+from scanner import scan, ScanFilters, UNIVERSE, UNIVERSE_US, UNIVERSE_INTL, UNIVERSE_INTL_FULL, UNIVERSE_CH
 from autotrader import TraderConfig
 from core import env_get, env_save
 
@@ -23,14 +23,16 @@ def render(data_client, get_price_fn, buy_fn, sell_fn, mt, use_hist, as_of_date,
     # ── Market selector ────────────────────────────────────────────────────
     market_choice = st.radio(
         "Market",
-        ["🇺🇸 US", "🌍 INTL (small)", "🌍 INTL (full)", "🌐 All"],
+        ["🇺🇸 US", "🇨🇭 Swiss", "🌍 INTL (small)", "🌍 INTL (full)", "🌐 All"],
         horizontal=True,
         index=0,
         key="scan_market",
-        help="🇺🇸 US: ~500 US equities and ETFs  |  🌍 INTL (small): flagship ADRs + broad country ETFs (~60)  |  🌍 INTL (full): comprehensive international ADRs (~120)  |  🌐 All: full combined universe",
+        help="🇺🇸 US: ~500 US equities and ETFs  |  🇨🇭 Swiss: Swiss ADRs & US-listed equities (~94)  |  🌍 INTL (small): flagship ADRs + broad country ETFs  |  🌍 INTL (full): comprehensive international ADRs  |  🌐 All: full combined universe",
     )
     if market_choice == "🇺🇸 US":
         _base_universe = UNIVERSE_US
+    elif market_choice == "🇨🇭 Swiss":
+        _base_universe = UNIVERSE_CH
     elif market_choice == "🌍 INTL (small)":
         _base_universe = UNIVERSE_INTL
     elif market_choice == "🌍 INTL (full)":
@@ -57,7 +59,7 @@ def render(data_client, get_price_fn, buy_fn, sell_fn, mt, use_hist, as_of_date,
         st.session_state["_scan_market_prev"] = market_choice
 
     _default_all = len(_watchlist_valid) == 0
-    _market_label = {"🇺🇸 US": "US", "🌍 INTL (small)": "INTL (small)", "🌍 INTL (full)": "INTL (full)", "🌐 All": "All"}[market_choice]
+    _market_label = {"🇺🇸 US": "US", "🇨🇭 Swiss": "Swiss", "🌍 INTL (small)": "INTL (small)", "🌍 INTL (full)": "INTL (full)", "🌐 All": "All"}[market_choice]
     with st.expander(
         f"Symbol list — {f'{_market_label} universe' if _default_all else f'{len(_watchlist_valid)} from watchlist'} ({len(_base_universe)} available)",
         expanded=False,
@@ -132,7 +134,9 @@ def render(data_client, get_price_fn, buy_fn, sell_fn, mt, use_hist, as_of_date,
 
         as_of_dt = datetime.combine(as_of_date, datetime.max.time()) if use_hist else None
         with st.spinner("Running scan…"):
-            st.session_state.scan_results, st.session_state.scan_skipped = scan(
+            (st.session_state.scan_results,
+             st.session_state.scan_skipped,
+             st.session_state.scan_no_data) = scan(
                 data_client, top_n=int(top_n),
                 progress_cb=on_progress, as_of=as_of_dt,
                 filters=scan_filters, symbols=scan_symbols)
@@ -156,7 +160,8 @@ def render(data_client, get_price_fn, buy_fn, sell_fn, mt, use_hist, as_of_date,
     results = st.session_state.get("scan_results", pd.DataFrame())
 
     scan_ran = st.session_state.get("scan_ts") is not None
-    skipped = st.session_state.get("scan_skipped", 0)
+    skipped  = st.session_state.get("scan_skipped", 0)
+    no_data  = st.session_state.get("scan_no_data", 0)
     if results.empty and scan_ran:
         st.warning(
             "📉 **Not a good time to invest.** "
@@ -164,8 +169,13 @@ def render(data_client, get_price_fn, buy_fn, sell_fn, mt, use_hist, as_of_date,
             "no candidates passed the quality filters. "
             "Try again later or loosen the filter thresholds."
         )
-    if scan_ran and skipped:
-        st.caption(f"{skipped} symbol(s) skipped — insufficient price history (< 52 bars).")
+    if scan_ran and (skipped or no_data):
+        parts = []
+        if skipped:
+            parts.append(f"{skipped} skipped (< 52 bars)")
+        if no_data:
+            parts.append(f"{no_data} unavailable (no data)")
+        st.caption("Symbols excluded: " + "  |  ".join(parts) + ".")
 
     if not results.empty:
         scan_ts = st.session_state.get("scan_ts")
@@ -181,6 +191,17 @@ def render(data_client, get_price_fn, buy_fn, sell_fn, mt, use_hist, as_of_date,
                     st.rerun()
             else:
                 st.caption(msg)
+        # Warn about already-open positions in the results
+        if mt is not None:
+            open_syms = set(mt.active_symbols()) if hasattr(mt, "active_symbols") else set()
+            already_open = [s for s in results.index if s in open_syms]
+            if already_open:
+                st.info(
+                    f"Already open: **{', '.join(already_open)}** — "
+                    "Quick Invest will skip these symbols.",
+                    icon="ℹ️",
+                )
+
         st.success(f"Found {len(results)} candidates. Select rows then send to AutoTrader.")
 
         selection = st.dataframe(
@@ -229,8 +250,13 @@ def render(data_client, get_price_fn, buy_fn, sell_fn, mt, use_hist, as_of_date,
 
             if st.button("⚡ Invest Now", type="primary", key="qi_invest"):
                 st.session_state.pop("qi_summary", None)
+                _open = set(mt.active_symbols()) if mt and hasattr(mt, "active_symbols") else set()
                 summary_rows = []
                 for sym in syms_to_invest:
+                    if sym in _open:
+                        summary_rows.append({"Symbol": sym, "Qty": "—", "Price": "—",
+                                             "Amount": "—", "Status": "⏭ already open — skipped"})
+                        continue
                     try:
                         price = get_price_fn(sym)
                         qty   = max(1, int(qi_dollar / price))

@@ -1,4 +1,5 @@
 import time
+from datetime import datetime
 import streamlit as st
 import pandas as pd
 
@@ -244,6 +245,11 @@ def render(mt, get_price_fn, buy_fn, sell_fn, get_bars_fn, get_equity_fn, broker
                         st.markdown(f"**P&L:** :{pnl_color}[${s.pnl:+,.2f}]")
                         pct = min(s.drawdown_pct / s.threshold_pct, 1.0) if s.threshold_pct else 0.0
                         st.progress(pct, text=f"Drawdown {s.drawdown_pct:.2f}% / {s.threshold_pct:.2f}%")
+                        # Stall warning: if last poll was more than 3× poll_interval ago
+                        if s.last_poll_at is not None:
+                            lag = (datetime.now() - s.last_poll_at).total_seconds()
+                            if lag > 3 * s.config.poll_interval:
+                                st.warning(f"⚠️ Price feed may be stalled — last poll {lag:.0f}s ago")
                         if s.breakeven_active:
                             st.caption("Breakeven active — stop floor at entry")
                         if s.tp_executed:
@@ -276,7 +282,21 @@ def render(mt, get_price_fn, buy_fn, sell_fn, get_bars_fn, get_equity_fn, broker
                     "Sells":   len(sells),
                     "P&L":     f"${s['pnl']:+,.2f}" if s.get("pnl") is not None else "—",
                 })
-            st.dataframe(pd.DataFrame(hist_rows), width="stretch", hide_index=True)
+            hist_df = pd.DataFrame(hist_rows)
+            st.dataframe(hist_df, width="stretch", hide_index=True)
+
+            # ── CSV export ────────────────────────────────────────────────────
+            all_fills = []
+            for s in live_sessions:
+                sym = s.get("meta", {}).get("symbol", "")
+                for f in s.get("fills", []):
+                    all_fills.append({**f, "symbol": f.get("symbol") or sym,
+                                      "session_pnl": s.get("pnl")})
+            if all_fills:
+                csv_bytes = pd.DataFrame(all_fills).to_csv(index=False).encode()
+                st.download_button("⬇ Download fills CSV", data=csv_bytes,
+                                   file_name="live_fills.csv", mime="text/csv")
+
             for s in live_sessions[:5]:
                 fills = s.get("fills", [])
                 if not fills:

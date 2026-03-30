@@ -181,7 +181,7 @@ class PortfolioManager:
         try:
             from scanner import scan
             self._log("Scanning for candidates…")
-            df, _ = scan(
+            df, _, _ = scan(
                 self._data_client,
                 top_n=max(50, self._target_slots * 5),
                 filters=self._scan_filters,

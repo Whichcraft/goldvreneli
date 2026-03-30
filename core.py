@@ -69,10 +69,12 @@ def load_daily_loss() -> float:
 
 
 def save_daily_loss(realized_loss: float) -> None:
-    """Persist today's cumulative realized loss to disk."""
+    """Persist today's cumulative realized loss to disk (atomic write)."""
     try:
-        with open(_DAILY_LOSS_FILE, "w") as f:
-            json.dump({"date": str(date.today()), "realized_loss": realized_loss}, f)
+        p   = Path(_DAILY_LOSS_FILE)
+        tmp = p.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"date": str(date.today()), "realized_loss": realized_loss}))
+        tmp.replace(p)
     except OSError:
         pass
 

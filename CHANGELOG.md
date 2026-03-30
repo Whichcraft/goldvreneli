@@ -8,6 +8,58 @@ All notable changes to this project will be documented here.
 
 ---
 
+## [1.1.0] — 2026-03-30
+
+### Fixed
+- **`daily_loss.json` atomic write** — replaced plain `open(...,"w")` with write-to-tmp + rename so a mid-write crash can no longer corrupt the daily loss guard (#31)
+- **Scale entry partial-fill recovery** — each tranche buy is now wrapped in try/except; on failure an ERROR log entry is written and the trader proceeds to WATCHING with however many shares were filled rather than silently orphaning a partial position (#32)
+
+### Added
+- **`TraderConfig` validation** — `__post_init__` raises `ValueError` for nonsensical values: `stop_value ≤ 0`, `poll_interval ≤ 0`, `scale_tranches < 1`, `tp_qty_fraction` outside (0,1], `max_loss_pct < 0` (#30)
+- **AutoTrader heartbeat** — `AutoTraderStatus.last_poll_at` updated on every price fetch; the per-position card in AutoTrader page warns when last poll was more than 3× poll_interval ago (#34)
+- **Scanner: split skipped count** — `scan()` now returns a 3-tuple `(df, skipped_history, skipped_no_data)`. The scanner page shows both counts separately: "N skipped (< 52 bars) | M unavailable (no data)" (#45)
+- **Scanner: warn on already-open positions** — Quick Invest shows an info banner for symbols already being tracked by the active MultiTrader, and skips them silently when investing (#42)
+- **Export fills to CSV** — ⬇ Download fills CSV button on AutoTrader (live fills) and Backtest (backtest fills) pages via `st.download_button` (#44)
+
+### Tests (76 total, up from 47)
+- `TestTraderConfigValidation` — 9 tests for all `TraderConfig.__post_init__` constraints (#30)
+- `TestScaleEntry` — average entry price, stop fires after all tranches, stop() mid-scale (#36)
+- `TestPartialTakeProfit` — partial sell at take-profit, remainder continues trailing; full close (#38)
+- `TestAtrStopLifecycle` — ATR stop fires via full `AutoTrader._run()` loop with mock `get_bars` (#37)
+- `TestMultiTrader` — 6 tests: start, duplicate symbol, concurrent positions, stop_all, daily loss limit, statuses (#35)
+- `TestReplayPriceFeed` — 8 tests: sequence, exhaustion, last price on exhaust, poll interval, progress, reset, bar_count, current_bar (#39)
+
+---
+
+## [1.0.0] — 2026-03-30
+
+### Changed
+- First stable release — all backlog items resolved, full feature parity across Alpaca and IBKR, comprehensive unit test suite, and complete documentation.
+
+---
+
+## [0.35.6] — 2026-03-30
+
+### Added
+- **Test Mode: Replay price source** — new "Price source" selector (Live / Replay). In Replay mode, pick a historical date, speed multiplier (1×–10000×), and optional time window (Full day / Duration / Custom range ET). Each symbol gets its own `ReplayPriceFeed` created lazily on first use so multiple simultaneous positions replay their own independent bar sequences. Per-symbol progress bars shown while positions are active. Switching replay config automatically resets the simulated account.
+
+---
+
+## [0.35.5] — 2026-03-30
+
+### Added
+- **Swiss universe extended to ~94 symbols** — added 46 more net: 5 Swiss-incorporated NYSE/NASDAQ names (GRMN, CB, TEL, RIG, WFRD), plus OTC ADRs/foreign shares covering watches (SWGAY), technology (Tecan, Sensirion, u-blox, Inficon, Comet, LEM, Feintool, Huber+Suhner, Belimo, Interroll, Burckhardt, Dätwyler, Autoneum, Montana Aerospace, Rieter), pharma/medtech (Medartis, BB Biotech, Siegfried, Galenica, Ypsomed), real estate (Swiss Prime Site, PSP Swiss Property, Mobimo), financial (Vontobel, BCV, Valiant, Cembra, HBM Healthcare), and industrials/other (SoftwareOne, Forbo, Zehnder, Gurit, Bossard, Meyer Burger, Flughafen Zürich, ALSO, Stadler Rail, Emmi, TX Group)
+
+---
+
+## [0.35.4] — 2026-03-30
+
+### Added
+- **Swiss universe expanded** — `UNIVERSE_CH` grows from 9 to ~50 symbols: added all SMI blue chips (Lonza, Sika, Zurich Insurance, Holcim, Swiss Re, Givaudan, Adecco, Kuehne+Nagel, Julius Baer, Swiss Life, Sonova, Swisscom, SGS, Partners Group), mid-caps (Helvetia, Baloise, Temenos, Clariant, Straumann, Lindt, Geberit, EMS-Chemie, Georg Fischer, Schindler, VAT Group, ams-OSRAM, OC Oerlikon, dormakaba, Barry Callebaut, Landis+Gyr, Glencore, Sulzer, SFS Group, Bucher Industries, Avolta, EFG International), plus Alcon and Sandoz (recent Novartis spin-offs on NYSE), and `HEWL` hedged ETF
+- **Test Mode: Clear paper account** — new "Reset simulated account" expander with checkbox confirmation guard; stops all running simulated positions and resets the session
+
+---
+
 ## [0.35.2] — 2026-03-30
 
 ### Fixed
