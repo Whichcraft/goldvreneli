@@ -700,6 +700,36 @@ if broker == "Alpaca":
 
         _default_symbol = st.session_state.get("at_current_symbol") or env_get("AT_SYMBOL", "")
 
+        # Qty sizing — outside form so radio switches update inputs immediately
+        qty_mode = st.radio("Qty mode", ["Shares", "Dollar amount", "Risk %"],
+                            horizontal=True, label_visibility="collapsed", key="at_qty_mode")
+        if qty_mode == "Shares":
+            at_qty = st.number_input("Qty (shares)", min_value=1, value=1, step=1, key="at_qty_shares")
+        elif qty_mode == "Dollar amount":
+            qc1, qc2 = st.columns(2)
+            at_dollar_amt = qc1.number_input("$ amount to invest", min_value=1.0,
+                                              value=1000.0, step=100.0, key="at_dollar_amt")
+            at_price_est  = qc2.number_input("Est. price per share ($)", min_value=0.01,
+                                              value=100.0, step=1.0, key="at_price_est")
+            at_qty = max(1, int(at_dollar_amt / at_price_est))
+            st.caption(f"≈ **{at_qty}** shares @ ${at_price_est:.2f} = ${at_qty * at_price_est:,.2f}")
+        else:  # Risk %
+            rc1, rc2, rc3, rc4 = st.columns(4)
+            at_equity    = rc1.number_input("Account equity ($)", min_value=1.0,
+                                             value=float(account.equity) if 'account' in locals() else 10000.0,
+                                             step=500.0, key="at_equity")
+            at_risk_pct  = rc2.number_input("Risk per trade (%)", min_value=0.1,
+                                             max_value=10.0, value=1.0, step=0.1, key="at_risk_pct")
+            at_entry_est = rc3.number_input("Est. entry price ($)", min_value=0.01,
+                                             value=100.0, step=1.0, key="at_entry_est")
+            at_stop_est  = rc4.number_input("Est. stop %", min_value=0.1, max_value=20.0,
+                                             value=float(env_get("AT_THRESHOLD", "0.5")), step=0.1,
+                                             key="at_stop_est")
+            stop_dist_est = at_entry_est * at_stop_est / 100
+            at_qty = size_from_risk(at_equity, at_risk_pct, at_entry_est, stop_dist_est)
+            st.caption(f"**{at_qty}** shares — risking "
+                       f"${at_equity * at_risk_pct / 100:,.2f} @ ${stop_dist_est:.2f} stop dist")
+
         with st.form("at_config"):
             st.markdown("**New Position**")
             c1, c2, c3 = st.columns(3)
@@ -712,33 +742,6 @@ if broker == "Alpaca":
                 value=float(env_get("AT_THRESHOLD", "0.5")), step=0.1,
                 help="For PCT: % drop from peak triggers sell. For ATR: multiplier × ATR(14).",
             )
-
-            # Qty sizing mode
-            qty_mode = st.radio("Qty mode", ["Shares", "Dollar amount", "Risk %"],
-                                horizontal=True, label_visibility="collapsed")
-            if qty_mode == "Shares":
-                at_qty = st.number_input("Qty (shares)", min_value=1, value=1, step=1)
-            elif qty_mode == "Dollar amount":
-                qc1, qc2 = st.columns(2)
-                at_dollar_amt  = qc1.number_input("$ amount to invest", min_value=1.0,
-                                                   value=1000.0, step=100.0)
-                at_price_est   = qc2.number_input("Est. price per share ($)", min_value=0.01,
-                                                   value=100.0, step=1.0)
-                at_qty = max(1, int(at_dollar_amt / at_price_est))
-                st.caption(f"≈ **{at_qty}** shares @ ${at_price_est:.2f} = ${at_qty * at_price_est:,.2f}")
-            else:
-                rc1, rc2, rc3 = st.columns(3)
-                at_equity    = rc1.number_input("Account equity ($)", min_value=1.0,
-                                                 value=float(account.equity) if 'account' in locals() else 10000.0,
-                                                 step=500.0)
-                at_risk_pct  = rc2.number_input("Risk per trade (%)", min_value=0.1,
-                                                 max_value=10.0, value=1.0, step=0.1)
-                at_entry_est = rc3.number_input("Est. entry price ($)", min_value=0.01,
-                                                 value=100.0, step=1.0)
-                stop_dist_est = at_entry_est * at_stop_val / 100
-                at_qty = size_from_risk(at_equity, at_risk_pct, at_entry_est, stop_dist_est)
-                st.caption(f"**{at_qty}** shares — risking "
-                           f"${at_equity * at_risk_pct / 100:,.2f} @ ${stop_dist_est:.2f} stop dist")
 
             at_poll = st.number_input("Poll interval (s)", min_value=1,
                                       value=int(env_get("AT_POLL", "5")), step=1)
