@@ -16,7 +16,7 @@ Scoring (higher = better):
   - ATR% (prefer moderate volatility)
   - Trend consistency (SMA20 > SMA50 slope)
 
-Fetch: 60 days of daily bars; parallelised with ThreadPoolExecutor.
+Fetch: 80 days of daily bars; parallelised with ThreadPoolExecutor.
 Uses Alpaca market data (free, no funded account needed).
 """
 
@@ -369,7 +369,7 @@ UNIVERSE_INTL_FULL = list(dict.fromkeys(UNIVERSE_INTL_FULL))
 UNIVERSE = list(dict.fromkeys(UNIVERSE_US + UNIVERSE_INTL_FULL))
 
 
-def fetch_bars(data_client, symbol: str, days: int = 60,
+def fetch_bars(data_client, symbol: str, days: int = 80,
                as_of: Optional[datetime] = None) -> Optional[pd.DataFrame]:
     """Fetch daily bars for a symbol using Alpaca data client."""
     from alpaca.data.requests import StockBarsRequest
@@ -481,7 +481,7 @@ def score_symbol(bars: pd.DataFrame,
     }
 
 
-def _batch_fetch(data_client, syms: list, days: int = 60,
+def _batch_fetch(data_client, syms: list, days: int = 80,
                  as_of: Optional[datetime] = None) -> Dict[str, pd.DataFrame]:
     """Fetch daily bars for multiple symbols in a single API call."""
     from alpaca.data.requests import StockBarsRequest
@@ -548,7 +548,7 @@ def scan(data_client, top_n: int = 10, progress_cb=None,
     chunks = [symbols[i:i + chunk_size] for i in range(0, len(symbols), chunk_size)]
     done = 0
     with ThreadPoolExecutor(max_workers=min(len(chunks), 4)) as ex:
-        futs = {ex.submit(_batch_fetch, data_client, chunk, 60, as_of): len(chunk)
+        futs = {ex.submit(_batch_fetch, data_client, chunk, 80, as_of): len(chunk)
                 for chunk in chunks}
         for fut in as_completed(futs):
             bars_map.update(fut.result())

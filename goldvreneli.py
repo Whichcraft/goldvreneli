@@ -18,7 +18,6 @@ from autotrader import (
     AutoTrader, MultiTrader, TraderConfig, TraderState,
     StopMode, EntryMode, size_from_risk,
 )
-from replay import ReplayPriceFeed, SyntheticPriceFeed, MockBroker, load_sessions
 from scanner import scan, ScanFilters, UNIVERSE, UNIVERSE_US, UNIVERSE_INTL, UNIVERSE_INTL_FULL
 from activity_tracker import render_sidebar_log
 
@@ -28,7 +27,6 @@ import pages.portfolio_page as portfolio_page
 import pages.autotrader_page as autotrader_page
 import pages.portfolio_mode_page as portfolio_mode_page
 import pages.scanner_page as scanner_page
-import pages.backtest_page as backtest_page
 import pages.test_mode_page as test_mode_page
 from ibkr_data import IBKRDataClient
 
@@ -68,7 +66,7 @@ with st.sidebar:
     # Allow programmatic navigation (e.g. Scanner → AutoTrader handoff)
     if "nav_page" in st.session_state:
         _target = st.session_state.pop("nav_page")
-        if _target in ("Backtest", "Test Mode"):
+        if _target == "Test Mode":
             st.session_state["nav_test"]  = _target
             st.session_state.pop("nav_radio", None)
         else:
@@ -91,8 +89,8 @@ with st.sidebar:
 
     # ── Testing nav ───────────────────────────────────────────────────────
     st.caption("**Testing**")
-    _test_pages = ["Backtest", "Test Mode"]
-    _test_icons = ["🧪", "🎮"]
+    _test_pages = ["Test Mode"]
+    _test_icons = ["🎮"]
     test_page = st.radio(
         "Testing",
         _test_pages,
@@ -284,8 +282,6 @@ if broker == "Alpaca":
                                    get_equity_fn, broker, trading_client, None)
     elif page == "Scanner":
         scanner_page.render(data_client, get_price_fn, buy_fn, sell_fn, mt, use_hist, as_of_date, broker)
-    elif page == "Backtest":
-        backtest_page.render(data_client, broker)
     elif page == "Test Mode":
         test_mode_page.render(data_client, get_price_fn, get_bars_fn)
 
@@ -483,7 +479,5 @@ else:
                                    get_equity_fn, broker, None, ib)
     elif page == "Scanner":
         scanner_page.render(data_client, get_price_fn, buy_fn, sell_fn, mt, use_hist, as_of_date, broker)
-    elif page == "Backtest":
-        backtest_page.render(data_client, broker)
     elif page == "Test Mode":
         test_mode_page.render(data_client, get_price_fn, get_bars_fn)

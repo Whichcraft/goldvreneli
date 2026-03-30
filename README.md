@@ -1,19 +1,19 @@
 # Goldvreneli Trading Dashboard
 
-![Version](https://img.shields.io/badge/version-1.1.0-blue)
+![Version](https://img.shields.io/badge/version-1.2.0-blue)
 
-A Streamlit-based trading dashboard supporting **Alpaca Paper and Live Trading** and **Interactive Brokers (IBKR)** via IB Gateway, with automated trailing-stop trading, technical scanning, portfolio automation, and offline backtesting.
+A Streamlit-based trading dashboard supporting **Alpaca Paper and Live Trading** and **Interactive Brokers (IBKR)** via IB Gateway, with automated trailing-stop trading, technical scanning, and portfolio automation.
 
 ---
 
 ## Features
 
 - **Alpaca paper and live trading** — toggle between modes in the sidebar; live mode requires confirmation and shows a red warning banner
-- **IBKR live/paper trading** — IB Gateway managed directly from the app (no Docker); full page parity with Alpaca: Scanner, AutoTrader, Portfolio Mode, and Backtest all work with IBKR
+- **IBKR live/paper trading** — IB Gateway managed directly from the app (no Docker); full page parity with Alpaca: Scanner, AutoTrader, Portfolio Mode all work with IBKR
 - **AutoTrader** — trailing-stop position manager: holds as long as price rises, sells when it drops below a configurable threshold; supports PCT and ATR stops, limit/scale entry, take-profit, breakeven, time stop, and multi-symbol queuing
 - **Portfolio Mode** — fully automated: maintains up to N concurrent positions from scanner picks, each sized at a fixed % of equity; on exit, rescans and opens the next best candidate
-- **Position Scanner** — scans liquid stocks, ETFs, and ADRs across four selectable universes (US ~593, INTL small ~62, INTL full ~125, All ~718) with technical filters (RSI, SMA, volume, relative strength vs SPY); **🧪 Test mode** in the sidebar replays as of any past date
-- **Backtest** — replay real Alpaca 1-minute bars or synthetic random-walk data to test AutoTrader settings offline
+- **Position Scanner** — scans liquid stocks, ETFs, and ADRs across five selectable universes (US, Swiss, INTL small, INTL full, All) with technical filters (RSI, SMA, volume, relative strength vs SPY)
+- **🎮 Test Mode** — run AutoTrader logic against live or historical (replay) prices without placing real orders; per-symbol replay progress and configurable speed
 - IB Gateway auto-start via IBC + Xvfb (headless, no manual login on startup)
 - Risk-% and dollar-amount position sizing
 - Semantic versioning + changelog
@@ -297,18 +297,15 @@ Covers `size_from_risk`, `_calc_atr`, `SyntheticPriceFeed`, `MockBroker`, `AutoT
 
 Enable **Test mode (historic data)** in the sidebar to run the Scanner as of any past date. An "As-of date" picker appears; all scanner fetches use closing data up to that date. Portfolio and trading pages are unaffected — this is a read-only, risk-free way to evaluate what the scanner would have surfaced on a given day.
 
-### 🧪 Backtest
+### 🎮 Test Mode
 
-Test AutoTrader logic offline — no real orders placed.
+Run AutoTrader logic against live or historical prices without placing real orders — all buys/sells are simulated.
 
-**Replay feed** — fetches real Alpaca 1-minute bars for a symbol and date, plays them back at configurable speed. Supports full day, duration (start time + N hours), or custom time range (ET).
+**Live** — uses real-time prices; runs indefinitely.
 
-**Synthetic feed** — geometric random walk. Configurable start price, volatility, drift, and random seed for reproducibility.
+**Replay** — fetches Alpaca 1-minute bars for any past date, replays at configurable speed. Each symbol tracked gets its own independent replay feed. Supports full day, duration (N hours from a start time), or custom time range (ET). Per-symbol progress bars show replay clock and completion.
 
-After the run:
-- Live status shows state, entry/current/peak/stop prices, P&L, drawdown bar, replay progress
-- Post-run summary shows final P&L (green/red) and fill counts
-- Session history table shows all past runs; expand any session to see individual fills
+**Reset simulated account** — clears all open simulated positions (guarded with confirmation checkbox).
 
 ---
 
@@ -321,7 +318,7 @@ After the run:
 3. Click **Start Gateway** on the Settings page — launches IB Gateway headlessly via IBC + Xvfb (allow 30–90 s)
 4. Once the API port shows *Open*, click **Connect**
 5. Approve the login on **IBKR Mobile** (push notification) — required once per session
-6. Use any page normally — Scanner, AutoTrader, Portfolio Mode, and Backtest all work with IBKR data and orders
+6. Use any page normally — Scanner, AutoTrader, Portfolio Mode all work with IBKR data and orders
 
 **Ports**
 
@@ -359,7 +356,7 @@ goldvreneli/
 │   ├── autotrader_page.py       # 🤖 AutoTrader page
 │   ├── portfolio_mode_page.py   # 📈 Portfolio Mode page
 │   ├── scanner_page.py          # 🔍 Scanner page
-│   └── backtest_page.py         # 🧪 Backtest page
+│   └── test_mode_page.py        # 🎮 Test Mode page
 ├── core.py                      # Framework-agnostic core: credentials, client cache, session factories, LiveFillLogger
 ├── autotrader.py                # AutoTrader + MultiTrader logic
 ├── portfolio.py                 # PortfolioManager: automated multi-position manager

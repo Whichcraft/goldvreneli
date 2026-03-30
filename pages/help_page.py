@@ -27,7 +27,7 @@ def render():
 - Use **🤖 AutoTrader** to enter a symbol manually with trailing stop
 
 ### Other pages
-- **🧪 Backtest** — replay real historical data to test stop settings before going live
+- **🎮 Test Mode** — run AutoTrader logic against live or historical prices without placing real orders
 - **⚙️ Settings** — API keys, scanner filter defaults, AutoTrader defaults
 """)
 
@@ -118,33 +118,24 @@ Scans ~600 liquid US stocks, ETFs, and ADRs using daily bar data and technical i
 Filter thresholds (RSI, price, ADV, volume, SMA20 tolerance, 5d return) are adjustable inline in the **Filters** expander on the Scanner page. Click *Save as defaults* to persist them to Settings.
 """)
 
-    with st.expander("🧪 Backtest"):
+    with st.expander("🎮 Test Mode"):
         st.markdown("""
-Run AutoTrader logic on historical or simulated data — no real orders are placed.
+Run AutoTrader logic against live or historical prices without placing real orders — buys and sells are simulated.
 
-**Replay feed** — fetches real Alpaca 1-minute bars for the chosen symbol and date, replays them at configurable speed. Use the time-window controls to test a specific part of the trading day.
+**Live** — uses real-time prices from the configured broker; runs indefinitely.
+
+**Replay** — fetches real Alpaca 1-minute bars for the chosen symbol and date, then replays them at configurable speed. Each symbol gets its own independent replay feed.
 
 | Setting | Description |
 |---------|-------------|
-| Symbol | Ticker to replay (defaults to AT_SYMBOL from Settings) |
-| Date | Trading day to replay (defaults to most recent weekday) |
+| Symbol | Ticker to trade |
+| Date | Trading day to replay |
 | Speed | 200 = 200× real time. Poll interval is set automatically. |
 | Full day | Replay the entire trading session |
 | Duration | Start at a time, replay for N hours |
 | Custom range | Specify exact start and end time (ET) |
 
-**Synthetic feed** — generates a geometric random walk; useful for testing stop logic in arbitrary market conditions.
-
-| Setting | Description |
-|---------|-------------|
-| Start price | Initial price in dollars |
-| Volatility % / step | Standard deviation per bar (0.5 = calm, 1.5 = volatile) |
-| Drift % / step | Positive = upward bias, negative = downward |
-| Fix random seed | Makes runs reproducible |
-
-**Session history** — every run is saved to the fills log (JSON). The history table shows all past sessions with symbol, feed type, buy/sell count, and final P&L. Expand any session to see individual fills.
-
-**Post-run summary** — when the trader finishes (SOLD or STOPPED), a summary box shows final P&L and fill counts immediately.
+**Reset simulated account** — clears all open simulated positions and resets the session. Guarded by a confirmation checkbox.
 """)
 
     with st.expander("⚙️ Settings"):
@@ -184,7 +175,7 @@ All settings are saved to `.env` in the install directory and persist across res
     with st.expander("Tips"):
         st.markdown("""
 - **Scanner → AutoTrader workflow**: Run Scanner, select top candidates in the table (multi-row), click *Send to AutoTrader*. Configure stop/qty for the first symbol and start; the next symbol pre-fills automatically.
-- **Backtest before live**: Use Backtest with Replay feed on a recent date to validate your stop settings before using AutoTrader during market hours.
+- **Test before live**: Use 🎮 Test Mode with Replay to validate your stop settings on recent historical data before using AutoTrader during market hours.
 - **Risk % sizing**: Set qty mode to *Risk %* so that a full stop-out always costs the same fraction of your equity, regardless of the stock's price or volatility.
 - **Breakeven + take-profit together**: Set take-profit to sell half at +1%, and breakeven at +0.5%. You lock in profit on half the position and can never lose money on the other half.
 - **Stale scan warning**: If scan results are more than 30 minutes old, a warning appears. Re-run the scan before sending symbols to AutoTrader.

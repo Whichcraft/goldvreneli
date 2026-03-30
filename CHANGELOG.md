@@ -8,6 +8,17 @@ All notable changes to this project will be documented here.
 
 ---
 
+## [1.2.0] — 2026-03-30
+
+### Fixed
+- **Scanner always returned "not a good time to invest"** — root cause: `days=60` (calendar) yields only ~42 trading days; `score_symbol` requires ≥ 52 bars for SMA50. All symbols were silently dropped in the bar-count check. Raised lookback to `days=80` calendar days (~55 trading days) to reliably satisfy the 52-bar minimum (#51)
+
+### Removed
+- **Backtest page** (`pages/backtest_page.py`) removed — Test Mode (🎮) supersedes it with live and replay support including per-symbol independent feeds (#50)
+- Removed unused `from replay import SyntheticPriceFeed, MockBroker, load_sessions` import from `goldvreneli.py` (replay.py itself is kept; it is used by Test Mode and tests)
+
+---
+
 ## [1.1.0] — 2026-03-30
 
 ### Fixed

@@ -41,7 +41,6 @@ goldvreneli/
 │   ├── autotrader_page.py       # render(mt, get_price_fn, buy_fn, sell_fn, get_bars_fn, ...)
 │   ├── portfolio_mode_page.py   # render(mt, data_client, get_price_fn, buy_fn, sell_fn, ...)
 │   ├── scanner_page.py          # render(data_client, get_price_fn, buy_fn, sell_fn, mt, ...)
-│   ├── backtest_page.py         # render(data_client, broker)
 │   └── test_mode_page.py        # render(data_client, get_price_fn, get_bars_fn)
 ├── core.py                      # Session store, API client caching, factory fns, LiveFillLogger
 ├── autotrader.py                # AutoTrader, MultiTrader, TraderConfig
@@ -59,7 +58,6 @@ goldvreneli/
 │   └── test_scanner.py          # score_symbol with fixture DataFrames
 ├── daily_loss.json              # today's cumulative realized loss (auto-managed)
 ├── live_fills.json              # live trade fill history (auto-managed)
-└── backtest_fills.json          # backtest session history (auto-managed)
 ```
 
 ### Page module conventions
@@ -74,7 +72,6 @@ Each page module in `pages/` exports a single public function `render(...)`. The
 | `autotrader_page` | `render(mt, get_price_fn, buy_fn, sell_fn, get_bars_fn, get_equity_fn, broker, trading_client, ib)` | `TraderState`, `TraderConfig`, `load_sessions`, `LIVE_FILLS_FILE` |
 | `portfolio_mode_page` | `render(mt, data_client, get_price_fn, buy_fn, sell_fn, get_bars_fn, get_equity_fn, broker, trading_client, ib)` | `TraderState`, `ScanFilters`, `get_portfolio_manager` |
 | `scanner_page` | `render(data_client, get_price_fn, buy_fn, sell_fn, mt, use_hist, as_of_date, broker)` | `scan`, `ScanFilters`, universe lists |
-| `backtest_page` | `render(data_client, broker)` | `ReplayPriceFeed`, `SyntheticPriceFeed`, `MockBroker`, `load_sessions` |
 | `test_mode_page` | `render(data_client, get_price_fn, get_bars_fn)` | `MultiTrader`, `ReplayPriceFeed`, `_ReplayDispatcher`, `autotrader_page` |
 
 ---
@@ -389,9 +386,9 @@ score = rs_5d×3  + rs_20d×1  + ret_5d×1  + ret_10d×0.5  + ret_20d×0.3
 
 | Function | Signature | Purpose |
 |---|---|---|
-| `fetch_bars` | `(data_client, symbol, days=60, as_of=None) → Optional[DataFrame]` | Fetch daily bars via Alpaca (60-day lookback) |
+| `fetch_bars` | `(data_client, symbol, days=80, as_of=None) → Optional[DataFrame]` | Fetch daily bars via Alpaca (80-day lookback ≈ 55 trading days) |
 | `score_symbol` | `(bars, spy_rets=None, filters=None) → dict or None` | Compute indicators; None if any hard filter fails |
-| `_batch_fetch` | `(data_client, syms, days=60, as_of=None) → Dict[str, DataFrame]` | Multi-symbol batch fetch |
+| `_batch_fetch` | `(data_client, syms, days=80, as_of=None) → Dict[str, DataFrame]` | Multi-symbol batch fetch |
 | `scan` | `(data_client, top_n=10, progress_cb=None, as_of=None, chunk_size=250, filters=None, symbols=None) → Tuple[DataFrame, int, int]` | Full scan; returns `(top_n_df, skipped_history, skipped_no_data)` |
 
 **`scan()` return value:**
@@ -417,7 +414,7 @@ score = rs_5d×3  + rs_20d×1  + ret_5d×1  + ret_10d×0.5  + ret_20d×0.3
 
 ---
 
-### `replay.py` — Backtest Tools
+### `replay.py` — Replay & Simulation Tools
 
 #### `ReplayPriceFeed` class
 
@@ -619,13 +616,12 @@ GatewayManager(
 | **AutoTrader** | Multi-symbol manager, queue, position table, daily summary, trade history, CSV export |
 | **Portfolio Mode** | Automated multi-slot investing, monitoring |
 | **Scanner** | Technical screening, Quick Invest (skips already-open positions), queue to AutoTrader |
-| **Backtest** | Replay/synthetic feeds, mock broker, session history, CSV export |
 | **Test Mode** | Paper trading against live or historical prices; per-symbol replay progress |
 
 #### Broker scope
 
 - **Alpaca** — all pages
-- **IBKR** — all pages (full parity: Scanner, AutoTrader, Portfolio Mode, Portfolio, Backtest, Settings, Help)
+- **IBKR** — all pages (Scanner, AutoTrader, Portfolio Mode, Portfolio, Test Mode, Settings, Help)
 
 #### Shared broker callables (defined in goldvreneli.py, injected into page modules)
 
@@ -752,18 +748,10 @@ User: start_all()
 ```
 scan(data_client, filters)
   → fetch SPY bars (baseline for RS)
-  → batch fetch all symbols' 60d bars (parallel, chunks of 250)
+  → batch fetch all symbols' 80d bars (parallel, chunks of 250)
   → score_symbol() per symbol:
       apply hard filters → compute indicators → composite score
   → sort DESC → return (top_n DataFrame, skipped_history, skipped_no_data)
-```
-
-### Backtest flow
-```
-ReplayPriceFeed (or SyntheticPriceFeed)
-  ↕ get_price()
-MockBroker ← same AutoTrader code as live trading
-  → fills logged → backtest_fills.json
 ```
 
 ### Test Mode flow
@@ -921,9 +909,6 @@ Every rerun re-executes the entire script from line 1. Session state persists be
 | Quick Invest complete | Scanner | Shows fill summary; user clicks "Go to AutoTrader" to navigate |
 | Symbols queued to AutoTrader | Scanner | Cross-page navigation |
 | Stale scan results (30 min) | Scanner | Auto-triggers rescan via `scan_auto_trigger` flag |
-| Backtest started | Backtest | Show live status |
-| Backtest stopped | Backtest | Show results |
-| Refresh history button | Backtest | Reload `backtest_fills.json` |
 | Test Mode replay config changed | Test Mode | Detected via `_TEST_CFG_KEY` diff; resets feeds + MultiTrader |
 | Test Mode account reset | Test Mode | Clears simulated fills and MultiTrader |
 

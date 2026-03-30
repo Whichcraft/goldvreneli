@@ -211,11 +211,11 @@ Add a prominent panel (e.g. top of Portfolio or AutoTrader page) with two quick 
 - **Best holdings highlight** — sort open positions by unrealised P&L and visually surface the top performers (e.g. coloured badges or a pinned top-N table) so the user can decide at a glance which ones to realise
 The goal is making the exit decision fast and visible rather than buried in the positions table.
 
-### **51. [IMPORTANT] Fix scan: always returns "not a good time to invest"**
-The scanner consistently rejects all symbols as "not a good time to invest" regardless of market conditions. Do NOT change default filter thresholds — investigate why the scoring/filtering logic itself is failing (e.g. bad data shape, off-by-one in bar count, filter condition bug, incorrect column names after an API change).
+### ~~51. [IMPORTANT] Fix scan: always returns "not a good time to invest"~~ ✓ fixed in 1.2.0
+Root cause: `days=60` (calendar) ≈ 42 trading days < 52 required by `score_symbol`. All symbols silently skipped. Fixed by raising to `days=80`.
 
-### 50. Remove backtest completely
-Remove `replay.py`, `pages/backtest_page.py`, and all related UI/nav references. Clean up any imports, session state keys, and sidebar entries that reference the backtest feature.
+### ~~50. Remove backtest completely~~ ✓ fixed in 1.2.0
+Removed `pages/backtest_page.py` and all nav/dispatch references. `replay.py` retained (used by Test Mode and tests).
 
 ---
 

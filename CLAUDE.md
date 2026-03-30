@@ -3,10 +3,10 @@ Streamlit trading dashboard. `streamlit run goldvreneli.py`
 Use `qmd search "query"` before reading files.
 
 ## Files
-`goldvreneli.py` entry point (sidebar + dispatch) · `core.py` env/clients · `autotrader.py` AutoTrader/MultiTrader · `portfolio.py` PortfolioManager · `scanner.py` scan/ScanFilters/UNIVERSE_US/INTL · `replay.py` backtest · `gateway_manager.py` IB Gateway/IBC · `ibkr_data.py` IBKRDataClient · `version.py`
+`goldvreneli.py` entry point (sidebar + dispatch) · `core.py` env/clients · `autotrader.py` AutoTrader/MultiTrader · `portfolio.py` PortfolioManager · `scanner.py` scan/ScanFilters/UNIVERSE_US/INTL · `replay.py` replay feeds (used by Test Mode) · `activity_tracker.py` log renderer · `gateway_manager.py` IB Gateway/IBC · `ibkr_data.py` IBKRDataClient · `version.py`
 
 ### Page modules (`pages/`)
-`autotrader_page.py` · `scanner_page.py` · `portfolio_page.py` · `portfolio_mode_page.py` · `backtest_page.py` · `settings_page.py` · `help_page.py`
+`autotrader_page.py` · `scanner_page.py` · `portfolio_page.py` · `portfolio_mode_page.py` · `test_mode_page.py` · `settings_page.py` · `help_page.py`
 Each exports a single `render(...)` function. Pages must not import each other.
 
 ### Tests (`tests/`)
