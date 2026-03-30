@@ -1103,6 +1103,15 @@ if broker == "Alpaca":
 
         results = st.session_state.get("scan_results", pd.DataFrame())
 
+        scan_ran = st.session_state.get("scan_ts") is not None
+        if results.empty and scan_ran:
+            st.warning(
+                "📉 **Not a good time to invest.** "
+                "Stock exchanges are not doing well right now — "
+                "no candidates passed the quality filters. "
+                "Try again later or loosen the filter thresholds."
+            )
+
         if not results.empty:
             scan_ts = st.session_state.get("scan_ts")
             if scan_ts:
@@ -1199,7 +1208,7 @@ if broker == "Alpaca":
             fig_scan.update_layout(title=f"{chart_col} — Top Candidates",
                                    yaxis_title=chart_col, height=350)
             st.plotly_chart(fig_scan, width="stretch")
-        elif not run_scan:
+        elif not scan_ran:
             st.info("Run a scan to see candidates.")
 
     # ── Page: Backtest ────────────────────────────────────────────────────────
