@@ -663,11 +663,15 @@ class MultiTrader:
         logs.sort(key=lambda e: e.timestamp)
         return logs
 
-    def daily_pnl(self) -> float:
-        """Sum of current unrealized P&L across all watching positions."""
+    def unrealized_pnl(self) -> float:
+        """Sum of current unrealized P&L across all active positions."""
         with self._loss_lock:
             return sum(at.status.pnl for at in self._traders.values()
-                       if at.status.state == TraderState.WATCHING)
+                       if at.status.state in (TraderState.ENTERING, TraderState.WATCHING))
+
+    def daily_pnl(self) -> float:
+        """Deprecated alias for unrealized_pnl()."""
+        return self.unrealized_pnl()
 
     def realized_losses(self) -> float:
         """Cumulative realized losses today (positive number)."""

@@ -148,6 +148,17 @@ if page == "Settings":
         )
 
         st.divider()
+
+        # ── Portfolio Mode defaults ────────────────────────────────────────────
+        st.subheader("Portfolio Mode Defaults")
+        pmc1, pmc2 = st.columns(2)
+        f_pm_slots   = pmc1.number_input("Target slots", min_value=1, max_value=20,
+                                          value=int(env_get("PM_TARGET_SLOTS", "10")))
+        f_pm_slot_pct = pmc2.number_input("% of equity per slot", min_value=1.0,
+                                           max_value=50.0, step=1.0,
+                                           value=float(env_get("PM_SLOT_PCT", "10.0")))
+
+        st.divider()
         saved = st.form_submit_button("Save Settings", type="primary")
 
     if saved:
@@ -174,6 +185,8 @@ if page == "Settings":
             "SCAN_SMA20_TOL":          str(f_scan_sma20_tol),
             "SCAN_MIN_RET5D":          str(f_scan_min_ret5d),
             "SCAN_WATCHLIST":          f_scan_watchlist,
+            "PM_TARGET_SLOTS":         str(f_pm_slots),
+            "PM_SLOT_PCT":             str(f_pm_slot_pct),
         })
         # Clear cached clients so they reconnect with new keys
         clear_alpaca_cache()
@@ -418,6 +431,13 @@ if broker == "Alpaca":
             st.warning("Paper trading API keys not configured. Go to **Settings** to add them.")
             st.stop()
 
+    # ── Invalidate session objects when mode changes ───────────────────────────
+    _cur_mode = "live" if alpaca_is_live else "paper"
+    if st.session_state.get("_alpaca_mode") != _cur_mode:
+        st.session_state.pop("multitrader", None)
+        st.session_state.pop("portfolio_manager", None)
+        st.session_state["_alpaca_mode"] = _cur_mode
+
     try:
         trading_client, data_client = get_alpaca_clients(api_key, secret_key, paper=not alpaca_is_live)
     except Exception as e:
@@ -560,9 +580,13 @@ if broker == "Alpaca":
         st.caption("Enters positions and exits automatically via trailing stop, take-profit, breakeven, or time stop.")
 
         def alpaca_get_price(symbol: str) -> float:
-            from alpaca.data.requests import StockLatestQuoteRequest
+            from alpaca.data.requests import StockLatestQuoteRequest, StockLatestTradeRequest
             quote = data_client.get_stock_latest_quote(StockLatestQuoteRequest(symbol_or_symbols=symbol))
-            return float(quote[symbol].ask_price or quote[symbol].bid_price)
+            price = float(quote[symbol].ask_price or quote[symbol].bid_price)
+            if price <= 0:  # after hours: ask/bid may both be 0 — fall back to last trade
+                trade = data_client.get_stock_latest_trade(StockLatestTradeRequest(symbol_or_symbols=symbol))
+                price = float(trade[symbol].price)
+            return price
 
         def alpaca_buy(symbol: str, qty: int):
             trading_client.submit_order(MarketOrderRequest(
@@ -778,7 +802,7 @@ if broker == "Alpaca":
             # Daily summary
             st.divider()
             dl1, dl2 = st.columns(2)
-            dl1.metric("Unrealized P&L (watching)", f"${mt.daily_pnl():+,.2f}")
+            dl1.metric("Unrealized P&L (active)", f"${mt.unrealized_pnl():+,.2f}")
             dl2.metric("Realized losses today",     f"${mt.realized_losses():,.2f}")
 
             # Combined log
@@ -792,8 +816,8 @@ if broker == "Alpaca":
                             for e in reversed(all_logs)]
                 st.dataframe(pd.DataFrame(log_data), width="stretch", hide_index=True)
 
-        # Auto-refresh while any position is watching
-        if any(s.state == TraderState.WATCHING for s in mt.statuses().values()):
+        # Auto-refresh while any position is entering or watching
+        if any(s.state in (TraderState.ENTERING, TraderState.WATCHING) for s in mt.statuses().values()):
             time.sleep(5)
             st.rerun()
 
@@ -806,9 +830,13 @@ if broker == "Alpaca":
         )
 
         def alpaca_get_price_pm(symbol: str) -> float:
-            from alpaca.data.requests import StockLatestQuoteRequest
+            from alpaca.data.requests import StockLatestQuoteRequest, StockLatestTradeRequest
             quote = data_client.get_stock_latest_quote(StockLatestQuoteRequest(symbol_or_symbols=symbol))
-            return float(quote[symbol].ask_price or quote[symbol].bid_price)
+            price = float(quote[symbol].ask_price or quote[symbol].bid_price)
+            if price <= 0:
+                trade = data_client.get_stock_latest_trade(StockLatestTradeRequest(symbol_or_symbols=symbol))
+                price = float(trade[symbol].price)
+            return price
 
         def alpaca_buy_pm(symbol: str, qty: int):
             trading_client.submit_order(MarketOrderRequest(

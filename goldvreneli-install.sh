@@ -215,14 +215,21 @@ create_env_file() {
         GW_VERSION_PATH="$(dirname "$(ls "$GATEWAY_DIR"/*/ibgateway | head -1)")"
     fi
 
-    ALPACA_KEY="" ALPACA_SECRET="" IBKR_USER="" IBKR_PASS=""
+    ALPACA_KEY="" ALPACA_SECRET="" ALPACA_LIVE_KEY="" ALPACA_LIVE_SECRET="" IBKR_USER="" IBKR_PASS=""
 
     # Ask for API keys
     echo ""
-    read -rp "$(echo -e "${CYAN}[INPUT]${NC} Enter Alpaca API keys now? [Y/n]: ")" want_alpaca
+    read -rp "$(echo -e "${CYAN}[INPUT]${NC} Enter Alpaca Paper Trading keys now? [Y/n]: ")" want_alpaca
     if [[ ! "$want_alpaca" =~ ^[Nn]$ ]]; then
-        read -rp "$(echo -e "${CYAN}[INPUT]${NC} Alpaca API Key:    ")" ALPACA_KEY
-        read -rsp "$(echo -e "${CYAN}[INPUT]${NC} Alpaca Secret Key: ")" ALPACA_SECRET
+        read -rp "$(echo -e "${CYAN}[INPUT]${NC} Alpaca Paper API Key:    ")" ALPACA_KEY
+        read -rsp "$(echo -e "${CYAN}[INPUT]${NC} Alpaca Paper Secret Key: ")" ALPACA_SECRET
+        echo ""
+    fi
+
+    read -rp "$(echo -e "${CYAN}[INPUT]${NC} Enter Alpaca Live Trading keys now? [y/N]: ")" want_alpaca_live
+    if [[ "$want_alpaca_live" =~ ^[Yy]$ ]]; then
+        read -rp "$(echo -e "${CYAN}[INPUT]${NC} Alpaca Live API Key:    ")" ALPACA_LIVE_KEY
+        read -rsp "$(echo -e "${CYAN}[INPUT]${NC} Alpaca Live Secret Key: ")" ALPACA_LIVE_SECRET
         echo ""
     fi
 
@@ -239,8 +246,8 @@ ALPACA_PAPER_API_KEY=${ALPACA_KEY}
 ALPACA_PAPER_SECRET_KEY=${ALPACA_SECRET}
 
 # ── Alpaca Live Trading (required only for live mode) ─────────────────────────
-ALPACA_LIVE_API_KEY=
-ALPACA_LIVE_SECRET_KEY=
+ALPACA_LIVE_API_KEY=${ALPACA_LIVE_KEY}
+ALPACA_LIVE_SECRET_KEY=${ALPACA_LIVE_SECRET}
 
 # ── IBKR Credentials ─────────────────────────────────────────────────────────
 IBKR_USERNAME=${IBKR_USER}
