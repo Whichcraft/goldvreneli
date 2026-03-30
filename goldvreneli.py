@@ -1000,17 +1000,6 @@ if broker == "Alpaca":
         st.subheader("Position Scanner")
         st.caption("Scans ~600 liquid US stocks, ETFs, and ADRs, applies technical filters, proposes the top candidates.")
 
-        # ── Build filters from saved settings ─────────────────────────────────
-        scan_filters = ScanFilters(
-            min_price     = float(env_get("SCAN_MIN_PRICE", "5.0")),
-            min_adv_m     = float(env_get("SCAN_MIN_ADV_M", "5.0")),
-            rsi_lo        = float(env_get("SCAN_RSI_LO",    "35")),
-            rsi_hi        = float(env_get("SCAN_RSI_HI",    "72")),
-            vol_mult      = float(env_get("SCAN_VOL_MULT",  "1.0")),
-            sma20_tol_pct = float(env_get("SCAN_SMA20_TOL", "3.0")),
-            min_ret_5d    = float(env_get("SCAN_MIN_RET5D", "-1.0")),
-        )
-
         col_a, col_b, col_c = st.columns([1, 2, 2])
         top_n      = col_a.number_input("Top N results", min_value=1, max_value=50,
                                          value=int(env_get("SCAN_TOP_N", "10")))
@@ -1039,21 +1028,53 @@ if broker == "Alpaca":
             )
         scan_symbols = None if sel_all else (selected_syms or None)
 
-        with st.expander("Active filters"):
-            st.markdown(f"""
-| Filter | Value |
-|--------|-------|
-| Symbols | {"Full universe (%d)" % len(UNIVERSE) if scan_symbols is None else "%d selected" % len(scan_symbols)} |
-| Min price | ${scan_filters.min_price:.0f} |
-| Min ADV | ${scan_filters.min_adv_m:.0f}M |
-| RSI(14) | {scan_filters.rsi_lo:.0f} – {scan_filters.rsi_hi:.0f} |
-| Volume | ≥ {scan_filters.vol_mult:.1f}× 20-day avg |
-| SMA20 tolerance | {scan_filters.sma20_tol_pct:.1f}% below allowed |
-| Min 5d return | {scan_filters.min_ret_5d:.1f}% |
-| Above SMA50 | required |
+        # ── Live filter controls ───────────────────────────────────────────────
+        with st.expander("Filters", expanded=True):
+            fc1, fc2, fc3, fc4 = st.columns(4)
+            f_min_price  = fc1.number_input("Min price ($)",       min_value=0.0, step=1.0,
+                                             value=float(env_get("SCAN_MIN_PRICE",  "5.0")))
+            f_min_adv    = fc2.number_input("Min ADV ($M)",        min_value=0.0, step=1.0,
+                                             value=float(env_get("SCAN_MIN_ADV_M",  "5.0")))
+            f_vol_mult   = fc3.number_input("Volume ≥ N× avg",     min_value=0.0, step=0.1,
+                                             value=float(env_get("SCAN_VOL_MULT",   "1.0")))
+            f_sma20_tol  = fc4.number_input("SMA20 tolerance (%)", min_value=0.0, max_value=20.0, step=0.5,
+                                             value=float(env_get("SCAN_SMA20_TOL",  "3.0")),
+                                             help="Allow price up to this % below SMA20")
+            fc5, fc6, fc7, _ = st.columns(4)
+            f_rsi_lo     = fc5.number_input("RSI min",             min_value=1, max_value=98,
+                                             value=int(float(env_get("SCAN_RSI_LO", "35"))))
+            f_rsi_hi     = fc6.number_input("RSI max",             min_value=2, max_value=99,
+                                             value=int(float(env_get("SCAN_RSI_HI", "72"))))
+            f_min_ret5d  = fc7.number_input("Min 5d return (%)",   min_value=-20.0, max_value=20.0, step=0.5,
+                                             value=float(env_get("SCAN_MIN_RET5D",  "-1.0")))
 
-_Adjust thresholds in **⚙️ Settings → Scanner Filters**_
-""")
+            save_filters = st.button("Save as defaults", help="Persist these values to ⚙️ Settings")
+            if save_filters:
+                env_save({
+                    "SCAN_MIN_PRICE": str(f_min_price),
+                    "SCAN_MIN_ADV_M": str(f_min_adv),
+                    "SCAN_VOL_MULT":  str(f_vol_mult),
+                    "SCAN_SMA20_TOL": str(f_sma20_tol),
+                    "SCAN_RSI_LO":    str(f_rsi_lo),
+                    "SCAN_RSI_HI":    str(f_rsi_hi),
+                    "SCAN_MIN_RET5D": str(f_min_ret5d),
+                })
+                st.success("Filter defaults saved.")
+
+        # ── Build filters from controls ────────────────────────────────────────
+        try:
+            scan_filters = ScanFilters(
+                min_price     = f_min_price,
+                min_adv_m     = f_min_adv,
+                rsi_lo        = float(f_rsi_lo),
+                rsi_hi        = float(f_rsi_hi),
+                vol_mult      = f_vol_mult,
+                sma20_tol_pct = f_sma20_tol,
+                min_ret_5d    = f_min_ret5d,
+            )
+        except ValueError as e:
+            st.error(f"Invalid filter values: {e}")
+            st.stop()
 
         run_scan = st.button("Run Scan", type="primary")
 
