@@ -41,18 +41,21 @@ goldvreneli/
 │   ├── autotrader_page.py       # render(mt, get_price_fn, buy_fn, sell_fn, get_bars_fn, ...)
 │   ├── portfolio_mode_page.py   # render(mt, data_client, get_price_fn, buy_fn, sell_fn, ...)
 │   ├── scanner_page.py          # render(data_client, get_price_fn, buy_fn, sell_fn, mt, ...)
-│   └── backtest_page.py         # render(data_client, broker)
+│   ├── backtest_page.py         # render(data_client, broker)
+│   └── test_mode_page.py        # render(data_client, get_price_fn, get_bars_fn)
 ├── core.py                      # Session store, API client caching, factory fns, LiveFillLogger
 ├── autotrader.py                # AutoTrader, MultiTrader, TraderConfig
 ├── portfolio.py                 # PortfolioManager
 ├── scanner.py                   # scan(), ScanFilters, universe lists
 ├── replay.py                    # ReplayPriceFeed, SyntheticPriceFeed, MockBroker, load_sessions
+├── activity_tracker.py          # render_log(), render_sidebar_log() — reusable log renderer
 ├── ibkr_data.py                 # IBKRDataClient: Alpaca data client interface shim for IBKR
 ├── gateway_manager.py           # IB Gateway subprocess lifecycle
 ├── version.py                   # __version__ string
 ├── .env                         # credentials (created on first run)
 ├── tests/
-│   ├── test_autotrader.py       # size_from_risk, _calc_atr, SyntheticPriceFeed, MockBroker, AutoTrader lifecycle
+│   ├── test_autotrader.py       # 76 tests: TraderConfig, AutoTrader lifecycle, scale entry,
+│   │                            #   partial TP, ATR stop, MultiTrader, ReplayPriceFeed
 │   └── test_scanner.py          # score_symbol with fixture DataFrames
 ├── daily_loss.json              # today's cumulative realized loss (auto-managed)
 ├── live_fills.json              # live trade fill history (auto-managed)
@@ -72,6 +75,7 @@ Each page module in `pages/` exports a single public function `render(...)`. The
 | `portfolio_mode_page` | `render(mt, data_client, get_price_fn, buy_fn, sell_fn, get_bars_fn, get_equity_fn, broker, trading_client, ib)` | `TraderState`, `ScanFilters`, `get_portfolio_manager` |
 | `scanner_page` | `render(data_client, get_price_fn, buy_fn, sell_fn, mt, use_hist, as_of_date, broker)` | `scan`, `ScanFilters`, universe lists |
 | `backtest_page` | `render(data_client, broker)` | `ReplayPriceFeed`, `SyntheticPriceFeed`, `MockBroker`, `load_sessions` |
+| `test_mode_page` | `render(data_client, get_price_fn, get_bars_fn)` | `MultiTrader`, `ReplayPriceFeed`, `_ReplayDispatcher`, `autotrader_page` |
 
 ---
 
@@ -82,7 +86,7 @@ Each page module in `pages/` exports a single public function `render(...)`. The
 Single source of truth for the package version string.
 
 ```python
-__version__ = "0.32.0"
+__version__ = "1.1.0"
 ```
 
 ---
@@ -115,7 +119,7 @@ No classes. All framework-agnostic module-level functions.
 | Function | Purpose |
 |---|---|
 | `load_daily_loss() → float` | Return today's cumulative realized loss from `daily_loss.json`; 0.0 if absent or stale |
-| `save_daily_loss(realized_loss: float)` | Persist today's realized loss to `daily_loss.json` |
+| `save_daily_loss(realized_loss: float)` | Persist today's realized loss to `daily_loss.json` using an **atomic write** (write to `.tmp` then `os.rename`) to prevent corruption on crash |
 
 **`LiveFillLogger`** — thread-safe fill log for live trades (same JSON format as `MockBroker`).
 
@@ -159,6 +163,15 @@ Wired into `MultiTrader` via `fill_open_fn`, `fill_record_fn`, `fill_close_fn` c
 | `tp_qty_fraction` | `1.0` | Fraction to sell at take-profit |
 | `breakeven_trigger_pct` | `0.0` | Move stop to entry after this gain (0 = disabled) |
 | `time_stop_minutes` | `0.0` | Close after N minutes (0 = disabled) |
+| `max_loss_pct` | `0.0` | Per-trade max loss % (0 = disabled) |
+
+`__post_init__` validates all numeric fields and raises `ValueError` on bad values:
+- `stop_value > 0`
+- `poll_interval > 0`
+- `scale_tranches >= 1`
+- `tp_qty_fraction` in `(0, 1]`
+- `max_loss_pct >= 0`
+- `limit_timeout_s > 0`
 
 **`TradeLog`**
 
@@ -185,6 +198,7 @@ Wired into `MultiTrader` via `fill_open_fn`, `fill_record_fn`, `fill_close_fn` c
 | `tranches_filled` | `int` | Scale-in progress |
 | `config` | `TraderConfig` | Snapshot of config at entry |
 | `entry_time` | `Optional[datetime]` | When position was entered |
+| `last_poll_at` | `Optional[datetime]` | Timestamp of most recent price fetch; used by UI to detect stalled feeds |
 | `log` | `List[TradeLog]` | Full activity log |
 
 #### `AutoTrader` class
@@ -222,11 +236,13 @@ AutoTrader(
 |---|---|
 | `_do_market_entry()` | Immediate market buy |
 | `_do_limit_entry()` | Wait for limit fill or timeout/cancel |
-| `_do_scale_entry()` | Buy N tranches at intervals |
+| `_do_scale_entry()` | Buy N tranches at intervals; per-tranche try/except for partial-fill recovery |
 | `_get_atr()` | Fetch ATR, cached 300s |
 | `_update_stop_floor()` | Compute stop price from peak + mode |
-| `_run()` | Main loop (daemon thread) |
+| `_run()` | Main loop (daemon thread); sets `status.last_poll_at` on every price fetch |
 | `_log(action, price, note)` | Append to trade log |
+
+**Scale entry partial-fill recovery:** If a tranche buy throws an exception, the loop breaks and proceeds to WATCHING with however many shares were already filled. Subsequent tranches are abandoned rather than orphaned.
 
 #### `MultiTrader` class
 
@@ -373,10 +389,15 @@ score = rs_5d×3  + rs_20d×1  + ret_5d×1  + ret_10d×0.5  + ret_20d×0.3
 
 | Function | Signature | Purpose |
 |---|---|---|
-| `fetch_bars` | `(data_client, symbol, days=90, as_of=None) → Optional[DataFrame]` | Fetch daily bars via Alpaca |
+| `fetch_bars` | `(data_client, symbol, days=60, as_of=None) → Optional[DataFrame]` | Fetch daily bars via Alpaca (60-day lookback) |
 | `score_symbol` | `(bars, spy_rets=None, filters=None) → dict or None` | Compute indicators; None if any hard filter fails |
-| `_batch_fetch` | `(data_client, syms, days=90, as_of=None) → Dict[str, DataFrame]` | Multi-symbol batch fetch |
-| `scan` | `(data_client, top_n=10, progress_cb=None, as_of=None, chunk_size=250, filters=None, symbols=None) → DataFrame` | Full scan; returns top_n by score |
+| `_batch_fetch` | `(data_client, syms, days=60, as_of=None) → Dict[str, DataFrame]` | Multi-symbol batch fetch |
+| `scan` | `(data_client, top_n=10, progress_cb=None, as_of=None, chunk_size=250, filters=None, symbols=None) → Tuple[DataFrame, int, int]` | Full scan; returns `(top_n_df, skipped_history, skipped_no_data)` |
+
+**`scan()` return value:**
+- `df` — `pd.DataFrame` of top N candidates sorted by score, index=Symbol
+- `skipped_history` — count of symbols with fewer than 52 bars (insufficient history)
+- `skipped_no_data` — count of symbols with no data returned from Alpaca at all
 
 **`scan()` output columns:** `Symbol`, `Price`, `RSI`, `1d Ret%`, `5d Ret%`, `20d Ret%`, `RS vs SPY`, `Vol/Avg`, `ATR%`, `MACD+`, `ADV $M`
 
@@ -389,6 +410,7 @@ score = rs_5d×3  + rs_20d×1  + ret_5d×1  + ret_10d×0.5  + ret_20d×0.3
 | `UNIVERSE_US` | ~400 | US equities and ETFs |
 | `UNIVERSE_INTL` | ~60 | Flagship ADRs + country ETFs |
 | `UNIVERSE_INTL_FULL` | ~120 | Extended international ADRs |
+| `UNIVERSE_CH` | ~94 | Swiss-incorporated equities, OTC ADRs, and ETFs (NYSE/NASDAQ-listed Swiss cos, Swiss-chartered NYSE/NASDAQ cos, OTC ADRs mega/large/mid/small-cap, sector buckets: pharma, RE, financial, industrial, ETFs) |
 | `UNIVERSE` | combined | All of the above deduplicated |
 
 **Imports from project:** *(none)*
@@ -486,6 +508,57 @@ MockBroker(
 
 ---
 
+### `activity_tracker.py` — Reusable Activity Log Renderer
+
+Module-level functions for rendering a `MultiTrader` activity log in Streamlit. Used by `autotrader_page` and the sidebar.
+
+| Function | Signature | Purpose |
+|---|---|---|
+| `render_log` | `(mt: MultiTrader, max_rows=None)` | Full activity log table (reversed chronological) |
+| `render_sidebar_log` | `(mt: MultiTrader, max_rows=8)` | Compact log panel inside `st.expander` in the sidebar |
+
+**Imports from project:** `autotrader`
+
+---
+
+### `pages/test_mode_page.py` — Paper Trading / Replay Simulator
+
+Runs AutoTrader logic against live or historical prices without placing real orders. Buys/sells are simulated (fills recorded at the polled price, no broker order submitted).
+
+**Modes:**
+- **Live** — uses the real-time `get_price_fn` callable; runs indefinitely.
+- **Replay** — replays Alpaca 1-min bars via `_ReplayDispatcher` at a configurable speed multiplier; each symbol gets its own `ReplayPriceFeed` created lazily on first use.
+
+#### `_ReplayDispatcher` (module-private)
+
+Per-symbol `ReplayPriceFeed` factory and dispatcher. Created once per replay config; stored in `st.session_state`.
+
+```python
+_ReplayDispatcher(
+    data_client,
+    replay_date: str,        # "YYYY-MM-DD"
+    speed: float,
+    start_time=None,         # time window: Full day, Duration, or Custom range
+    end_time=None,
+    duration_hours=None,
+)
+```
+
+| Method | Purpose |
+|---|---|
+| `get_price(symbol) → float` | Create feed on first call; return next price; return 0.0 on feed error |
+| `progress_for(symbol) → (pct, bar, total)` | Replay progress for a symbol |
+| `exhausted_for(symbol) → bool` | Whether feed for symbol is exhausted |
+| `current_time_for(symbol) → str` | Formatted replay clock for symbol |
+
+**Thread safety:** `_lock` guards `_feeds` / `_errors` dict mutations.
+
+**Config change detection:** The page serialises the active replay config to `st.session_state[_TEST_CFG_KEY]` on each run. If it differs from the stored value, all feeds and the simulated `MultiTrader` are reset automatically.
+
+**Imports from project:** `autotrader`, `replay`, `pages.autotrader_page`
+
+---
+
 ### `gateway_manager.py` — IB Gateway Lifecycle
 
 #### `GatewayManager` class
@@ -543,10 +616,11 @@ GatewayManager(
 | **Settings** | Alpaca/IBKR credentials; scanner/AutoTrader/Portfolio defaults |
 | **Help** | Documentation, workflows, keyboard shortcuts |
 | **Portfolio** | Account metrics, positions, price chart, place orders, open orders |
-| **AutoTrader** | Multi-symbol manager, queue, position table, daily summary, trade history |
+| **AutoTrader** | Multi-symbol manager, queue, position table, daily summary, trade history, CSV export |
 | **Portfolio Mode** | Automated multi-slot investing, monitoring |
-| **Scanner** | Technical screening, Quick Invest, queue to AutoTrader |
-| **Backtest** | Replay/synthetic feeds, mock broker, session history |
+| **Scanner** | Technical screening, Quick Invest (skips already-open positions), queue to AutoTrader |
+| **Backtest** | Replay/synthetic feeds, mock broker, session history, CSV export |
+| **Test Mode** | Paper trading against live or historical prices; per-symbol replay progress |
 
 #### Broker scope
 
@@ -596,6 +670,9 @@ Note: fetches one symbol at a time — expect slower scan times than Alpaca batc
 | `_broker_last` | `str` | Last active broker key (`"Alpaca"`, `"IBKR:paper"`, `"IBKR:live"`); triggers session reset on change |
 | `gw_start_attempted` | `bool` | Prevents repeated gateway auto-start on every rerun |
 | `ib_connect_attempted` | `bool` | Prevents repeated IB connect on every rerun |
+| `test_mode_multitrader` | `MultiTrader` | Simulated MultiTrader for Test Mode |
+| `test_mode_replay_dispatcher` | `_ReplayDispatcher` | Per-symbol replay feed manager |
+| `test_mode_replay_cfg` | `dict` | Last-used replay config; change detection triggers reset |
 
 **Imports from project:** all modules (`core`, `autotrader`, `portfolio`, `scanner`, `replay`, `gateway_manager`, `version`)
 
@@ -626,7 +703,12 @@ qty = floor(risk_dollars / stop_distance)
 ### Scale entry
 ```
 for i in range(n_tranches):
-    buy tranche_qty shares at market
+    try:
+        buy tranche_qty shares at market
+        total_filled += tranche_qty
+    except Exception:
+        if total_filled > 0: break   # proceed with partial fill
+        else: break                  # nothing filled; abort
     sleep(scale_interval_s)
 entry_price = total_cost / total_qty   # weighted average
 ```
@@ -651,7 +733,7 @@ User: symbol + qty + config
   → AutoTrader spawns daemon thread
   → _run() loop:
       ENTERING: market/limit/scale buy
-      WATCHING: poll price → update peak/stop
+      WATCHING: poll price → set last_poll_at → update peak/stop
                → check TP, breakeven, time stop, trailing stop
                → if triggered: place_sell → _on_close(pnl)
 ```
@@ -670,10 +752,10 @@ User: start_all()
 ```
 scan(data_client, filters)
   → fetch SPY bars (baseline for RS)
-  → batch fetch all symbols' 90d bars (parallel, chunks of 250)
+  → batch fetch all symbols' 60d bars (parallel, chunks of 250)
   → score_symbol() per symbol:
       apply hard filters → compute indicators → composite score
-  → sort DESC → return top_n DataFrame
+  → sort DESC → return (top_n DataFrame, skipped_history, skipped_no_data)
 ```
 
 ### Backtest flow
@@ -682,6 +764,17 @@ ReplayPriceFeed (or SyntheticPriceFeed)
   ↕ get_price()
 MockBroker ← same AutoTrader code as live trading
   → fills logged → backtest_fills.json
+```
+
+### Test Mode flow
+```
+User: configure symbol + qty + config (Live or Replay mode)
+  → Test Mode MultiTrader (simulated buy/sell, no real orders)
+  → Live mode: uses real get_price_fn
+  → Replay mode: _ReplayDispatcher.get_price(sym)
+      → lazy-creates ReplayPriceFeed per symbol on first call
+      → advances independently per symbol
+  → UI shows per-symbol replay progress bars + clock
 ```
 
 ---
@@ -696,6 +789,7 @@ MockBroker ← same AutoTrader code as live trading
 | `ReplayPriceFeed` | Thread-safe `get_price` | `_lock` on index |
 | `SyntheticPriceFeed` | Thread-safe `get_price` | `_lock` on price/step |
 | `MockBroker` | Thread-safe file writes | `_write_lock`, `_price_lock` |
+| `_ReplayDispatcher` | Thread-safe feed creation | `_lock` on `_feeds`/`_errors` dict |
 
 ---
 
@@ -735,9 +829,37 @@ Settings page (goldvreneli.py) — reads defaults, writes on Save
 | Snapshot pattern | `AutoTraderStatus`, `MultiTrader.statuses()` | Thread-safe reads without locks |
 | Event signalling | `AutoTrader._stop_event` | Graceful shutdown, no busy-wait |
 | Daemon threads | All background loops | Auto-cleanup on process exit |
-| Atomic file write | `MockBroker._flush()` | Temp file → rename, prevents corruption |
+| Atomic file write | `MockBroker._flush()`, `core.save_daily_loss()` | Temp file → rename, prevents corruption on crash |
 | Module-level caching | `core._alpaca_cache` | Survives Streamlit page reruns |
 | Rescan locking | `PortfolioManager._scan_lock` | Serialises long-running rescans |
+| Lazy per-symbol feeds | `_ReplayDispatcher` in test_mode_page | Supports multi-symbol replay without sharing feed state |
+| Heartbeat timestamp | `AutoTraderStatus.last_poll_at` | UI detects stalled price feeds (threshold: 3× poll_interval) |
+
+---
+
+## Test Suite
+
+Run with: `venv/bin/python -m pytest tests/ -v`
+
+### `tests/test_autotrader.py` — 76 tests
+
+| Class | Tests | What is covered |
+|---|---|---|
+| `TestSizeFromRisk` | 3 | `size_from_risk()` edge cases |
+| `TestCalcAtr` | 3 | `_calc_atr()` with fixture DataFrames |
+| `TestSyntheticPriceFeed` | 4 | GBM price generation, seed, floor |
+| `TestMockBroker` | 6 | Fill recording, JSON persistence, atomicity |
+| `TestAutoTraderLifecycle` | 11 | Full state machine: IDLE→ENTERING→WATCHING→SOLD/STOPPED/ERROR |
+| `TestTraderConfigValidation` | 6 | `__post_init__` raises on bad stop_value, poll_interval, scale_tranches, tp_qty_fraction, max_loss_pct, limit_timeout_s |
+| `TestScaleEntry` | 8 | Scale buy: full fill, partial fill on exception, ATR stop compatibility |
+| `TestPartialTakeProfit` | 6 | Take-profit partial exit; qty_remaining; trailing the remainder |
+| `TestAtrStopLifecycle` | 8 | ATR stop calculation, cache TTL, stop movement |
+| `TestMultiTrader` | 11 | Concurrent positions, daily loss limit enforcement, `active_symbols()` |
+| `TestReplayPriceFeed` | 10 | Replay advance, exhaustion, `object.__new__` bypass for unit testing without API calls |
+
+### `tests/test_scanner.py`
+
+Unit tests for `score_symbol()` with fixture DataFrames. Covers filter pass/fail and scoring formula correctness.
 
 ---
 
@@ -802,6 +924,8 @@ Every rerun re-executes the entire script from line 1. Session state persists be
 | Backtest started | Backtest | Show live status |
 | Backtest stopped | Backtest | Show results |
 | Refresh history button | Backtest | Reload `backtest_fills.json` |
+| Test Mode replay config changed | Test Mode | Detected via `_TEST_CFG_KEY` diff; resets feeds + MultiTrader |
+| Test Mode account reset | Test Mode | Clears simulated fills and MultiTrader |
 
 ### Auto-refresh loop invariant
 
@@ -823,6 +947,7 @@ Portfolio Mode page still uses a whole-page `time.sleep(5); st.rerun()` because 
 | **Scan cache** | `scan_results`, `scan_ts` | Written by Scanner; read by Portfolio Mode |
 | **Scan auto-trigger** | `scan_auto_trigger` | One-shot flag; set when results go stale; consumed at scan trigger point |
 | **Quick Invest** | `qi_summary` | Fill summary list shown after Invest Now; cleared on next invest or navigation |
+| **Test Mode** | `test_mode_multitrader`, `test_mode_replay_dispatcher`, `test_mode_replay_cfg` | Simulated trading state; reset on config change or manual account reset |
 
 ---
 
@@ -869,10 +994,11 @@ Mirrors Alpaca exactly, using keys `ibkr_live` / `ibkr_live_confirmed`. Addition
 |---|---|---|
 | **User-facing error + stop** | Broker connection failure | `st.error(msg)` then `st.stop()` |
 | **User-facing error** | Order submission, chart, quick invest | `st.error(msg)` — page continues |
-| **Validation error** | Scanner filter inputs | `except ValueError` → `st.error()` → `st.stop()` |
+| **Validation error** | Scanner filter inputs, `TraderConfig` | `except ValueError` → `st.error()` → `st.stop()` |
 | **Silent failure** | Alternate account data, IB reconnect | `except Exception: pass` |
 | **Batch error collection** | Quick Invest, attach positions | Collect in list; display summary after loop |
 | **Debug log only** | IBKR historical data per symbol | `logging.debug(...)` — user sees no error |
+| **Stall warning** | AutoTrader page, feed heartbeat | `st.warning(...)` when `last_poll_at` lag > 3× poll_interval |
 
 ---
 
@@ -914,9 +1040,13 @@ Returns `None` if the response is empty or any exception occurs.
 | `ADV $M` | float (1dp) |
 | `_score` | float (2dp) — internal; dropped from `scan()` output |
 
-### `scan()` → `pd.DataFrame`
+### `scan()` → `Tuple[pd.DataFrame, int, int]`
 
-Index: `Symbol` (str). Columns: all `score_symbol()` output keys except `_score`. Sorted by score descending, trimmed to `top_n`. Returns empty `pd.DataFrame()` if nothing passes filters.
+Returns a 3-tuple: `(df, skipped_history, skipped_no_data)`.
+
+- `df` — Index: `Symbol` (str). Columns: all `score_symbol()` output keys except `_score`. Sorted by score descending, trimmed to `top_n`. Returns empty `pd.DataFrame()` if nothing passes filters.
+- `skipped_history` — number of symbols that had data but fewer than 52 bars (insufficient history for scoring)
+- `skipped_no_data` — number of symbols for which Alpaca returned no data at all
 
 **No-data / rate-limit handling:** SPY missing → `spy_rets` defaults to `{}` (RS treated as 0). Per-symbol errors return `None` from `fetch_bars()`; symbol is silently skipped. No retry logic; relies on Alpaca client's built-in rate limiting.
 
@@ -935,3 +1065,7 @@ Index: `Symbol` (str). Columns: all `score_symbol()` output keys except `_score`
 - **File missing:** Creates parent directories and a fresh `{"sessions": []}` structure.
 - **File corrupted / `json.JSONDecodeError`:** Falls back to empty sessions; corrupted data is silently discarded.
 - **Atomicity:** Writes to temp file first, then renames — prevents half-written files.
+
+### `daily_loss.json` write safety
+
+`core.save_daily_loss()` uses an atomic write: data is written to `daily_loss.tmp` then renamed to `daily_loss.json`. This prevents a half-written file if the process crashes mid-write.
