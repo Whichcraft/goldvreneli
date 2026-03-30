@@ -27,8 +27,15 @@ with st.sidebar:
     st.markdown(f"## Goldvreneli `v{__version__}`")
     st.divider()
 
-    broker = st.radio("Broker", ["Alpaca (Paper)", "IBKR"],
+    broker = st.radio("Broker", ["Alpaca", "IBKR"],
                       horizontal=True, label_visibility="collapsed")
+
+    if broker == "Alpaca":
+        alpaca_is_live = st.toggle("Live Trading", key="alpaca_live")
+        if alpaca_is_live:
+            st.markdown(":red[**⚠️ LIVE — real money**]")
+    else:
+        alpaca_is_live = False
 
     st.divider()
 
@@ -36,7 +43,7 @@ with st.sidebar:
     if "nav_page" in st.session_state:
         st.session_state["nav_radio"] = st.session_state.pop("nav_page")
 
-    if broker == "Alpaca (Paper)":
+    if broker == "Alpaca":
         pages = ["Portfolio", "AutoTrader", "Portfolio Mode", "Scanner", "Backtest", "Settings", "Help"]
         icons = ["💼", "🤖", "📈", "🔍", "🧪", "⚙️", "❓"]
     else:
@@ -52,7 +59,7 @@ with st.sidebar:
     )
 
     st.divider()
-    st.caption("Alpaca Paper · IBKR · MIT License")
+    st.caption("Alpaca Paper/Live · IBKR · MIT License")
 
 # ── IBKR session helpers (thin wrappers that bind st.session_state) ───────────
 def _get_gateway(ibkr_user, ibkr_pass, trading_mode):
@@ -69,11 +76,18 @@ if page == "Settings":
 
     with st.form("settings_form"):
 
-        # ── Alpaca ────────────────────────────────────────────────────────────
+        # ── Alpaca Paper ──────────────────────────────────────────────────────
         st.subheader("Alpaca Paper Trading")
         c1, c2 = st.columns(2)
         f_alpaca_key    = c1.text_input("API Key",    value=env_get("ALPACA_PAPER_API_KEY"),    type="password")
         f_alpaca_secret = c2.text_input("Secret Key", value=env_get("ALPACA_PAPER_SECRET_KEY"), type="password")
+
+        # ── Alpaca Live ───────────────────────────────────────────────────────
+        st.subheader("Alpaca Live Trading")
+        st.caption("Get live API keys at alpaca.markets → Live Trading → API Keys.")
+        lc1, lc2 = st.columns(2)
+        f_alpaca_live_key    = lc1.text_input("Live API Key",    value=env_get("ALPACA_LIVE_API_KEY"),    type="password")
+        f_alpaca_live_secret = lc2.text_input("Live Secret Key", value=env_get("ALPACA_LIVE_SECRET_KEY"), type="password")
 
         st.divider()
 
@@ -139,6 +153,8 @@ if page == "Settings":
         env_save({
             "ALPACA_PAPER_API_KEY":    f_alpaca_key,
             "ALPACA_PAPER_SECRET_KEY": f_alpaca_secret,
+            "ALPACA_LIVE_API_KEY":     f_alpaca_live_key,
+            "ALPACA_LIVE_SECRET_KEY":  f_alpaca_live_secret,
             "IBKR_USERNAME":           f_ibkr_user,
             "IBKR_PASSWORD":           f_ibkr_pass,
             "IBKR_MODE":               f_ibkr_mode,
@@ -350,29 +366,50 @@ All settings are saved to `.env` in the install directory and persist across res
 # ══════════════════════════════════════════════════════════════════════════════
 # ALPACA DASHBOARD
 # ══════════════════════════════════════════════════════════════════════════════
-if broker == "Alpaca (Paper)":
+if broker == "Alpaca":
     from alpaca.trading.requests import MarketOrderRequest, LimitOrderRequest, GetOrdersRequest
     from alpaca.trading.enums import OrderSide, TimeInForce, QueryOrderStatus
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame
     from datetime import datetime, timedelta, time as dtime
 
-    api_key    = env_get("ALPACA_PAPER_API_KEY")
-    secret_key = env_get("ALPACA_PAPER_SECRET_KEY")
-
-    if not api_key or not secret_key:
-        st.warning("API keys not configured. Go to **Settings** to add them.")
-        st.stop()
+    if alpaca_is_live:
+        api_key    = env_get("ALPACA_LIVE_API_KEY")
+        secret_key = env_get("ALPACA_LIVE_SECRET_KEY")
+        if not api_key or not secret_key:
+            st.error("⚠️ Live trading API keys not configured.")
+            st.markdown("Enter your **live** Alpaca API keys below, or go to **Settings**.")
+            with st.form("live_creds_quick"):
+                lc1, lc2 = st.columns(2)
+                q_key    = lc1.text_input("Live API Key",    type="password")
+                q_secret = lc2.text_input("Live Secret Key", type="password")
+                if st.form_submit_button("Save & Connect", type="primary"):
+                    if q_key and q_secret:
+                        env_save({"ALPACA_LIVE_API_KEY": q_key, "ALPACA_LIVE_SECRET_KEY": q_secret})
+                        clear_alpaca_cache()
+                        st.rerun()
+                    else:
+                        st.error("Both fields are required.")
+            st.stop()
+    else:
+        api_key    = env_get("ALPACA_PAPER_API_KEY")
+        secret_key = env_get("ALPACA_PAPER_SECRET_KEY")
+        if not api_key or not secret_key:
+            st.warning("Paper trading API keys not configured. Go to **Settings** to add them.")
+            st.stop()
 
     try:
-        trading_client, data_client = get_alpaca_clients(api_key, secret_key)
+        trading_client, data_client = get_alpaca_clients(api_key, secret_key, paper=not alpaca_is_live)
     except Exception as e:
         st.error(f"Alpaca connection failed: {e}")
         st.stop()
 
     account = trading_client.get_account()
 
-    st.title("Portfolio Dashboard (Alpaca Paper)")
+    _mode_label = "Live" if alpaca_is_live else "Paper"
+    if alpaca_is_live:
+        st.error(f"⚠️ LIVE TRADING MODE — real money at risk")
+    st.title(f"Portfolio Dashboard (Alpaca {_mode_label})")
 
     # ── Page: Portfolio ───────────────────────────────────────────────────────
     if page == "Portfolio":

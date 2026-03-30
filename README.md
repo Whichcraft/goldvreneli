@@ -69,6 +69,10 @@ Fill in `.env` after install, or use the **⚙️ Settings** page in the app:
 ALPACA_PAPER_API_KEY=
 ALPACA_PAPER_SECRET_KEY=
 
+# Alpaca Live Trading (required only for live mode)
+ALPACA_LIVE_API_KEY=
+ALPACA_LIVE_SECRET_KEY=
+
 # IBKR
 IBKR_USERNAME=
 IBKR_PASSWORD=

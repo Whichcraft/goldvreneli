@@ -69,14 +69,14 @@ def env_save(values: Dict[str, str]) -> None:
 _alpaca_cache: Dict[Tuple[str, str], Any] = {}
 
 
-def get_alpaca_clients(api_key: str, secret_key: str) -> Tuple[Any, Any]:
-    """Return (TradingClient, StockHistoricalDataClient), cached by key pair."""
-    cache_key = (api_key, secret_key)
+def get_alpaca_clients(api_key: str, secret_key: str, paper: bool = True) -> Tuple[Any, Any]:
+    """Return (TradingClient, StockHistoricalDataClient), cached by key pair + mode."""
+    cache_key = (api_key, secret_key, paper)
     if cache_key not in _alpaca_cache:
         from alpaca.data.historical import StockHistoricalDataClient
         from alpaca.trading.client import TradingClient
         _alpaca_cache[cache_key] = (
-            TradingClient(api_key=api_key, secret_key=secret_key, paper=True),
+            TradingClient(api_key=api_key, secret_key=secret_key, paper=paper),
             StockHistoricalDataClient(api_key=api_key, secret_key=secret_key),
         )
     return _alpaca_cache[cache_key]
