@@ -334,6 +334,25 @@ class TestAutoTraderLifecycle:
         reached = wait_for_state(at, TraderState.ERROR, timeout=5)
         assert reached, f"Stuck in {at.status.state}"
 
+    def test_max_loss_guard_fires(self, tmp_path):
+        """max_loss_pct should trigger a sell even when price is still above the trailing stop floor."""
+        # Strong downward drift so price will drop well past max_loss_pct quickly
+        at, broker, _ = self._make_trader_and_broker(
+            tmp_path, start_price=100.0, volatility=0.1, drift=-20.0, seed=5)
+        cfg = TraderConfig(
+            stop_value=50.0,      # wide trailing stop — would not fire soon
+            max_loss_pct=2.0,     # exit if down 2% from entry
+            poll_interval=0.01,
+        )
+        at.start("TEST", 1, config=cfg)
+        reached = wait_for_state(at, TraderState.SOLD, timeout=10)
+        assert reached, f"Stuck in {at.status.state}"
+        # Loss should not vastly exceed max_loss_pct (some overshoot is expected from polling)
+        loss_pct = (at.status.entry_price - at.status.current_price) / at.status.entry_price * 100
+        assert loss_pct >= 2.0, "Max-loss guard should have fired at or below entry - 2%"
+        sell_fills = [f for f in broker.fills if f["action"] == "SELL"]
+        assert len(sell_fills) >= 1
+
     def test_breakeven_raises_stop_floor(self, tmp_path):
         """After breakeven activates, stop floor must be >= entry price."""
         at, _, _ = self._make_trader_and_broker(

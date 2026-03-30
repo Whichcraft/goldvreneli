@@ -98,7 +98,7 @@ Surface the Activity Log as a persistent panel in the left sidebar so it's visib
 ### ~~22. Remove default Streamlit page-link nav from top of sidebar~~ ✓ fixed in 0.34.1
 The auto-generated page links Streamlit renders at the top of the sidebar duplicate the custom nav and clutter the UI. Hide them (e.g. via `st.set_page_config` options or CSS) so only the custom navigation is shown.
 
-### 23. Allow realized loss to exceed trailing-stop value
+### ~~23. Allow realized loss to exceed trailing-stop value~~ ✓ fixed in 0.35.1
 Investigate scenarios where the actual realized loss on a trade can be larger than the configured trailing-stop threshold (e.g. gap-down opens, illiquid fills, scale-in entries where stop is calculated from first fill only). Document the cases and decide whether to add a hard max-loss guard per position.
 
 ### ~~24. Installer deploys even when already up to date~~ ✓ fixed in 0.34.1

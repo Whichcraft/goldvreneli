@@ -8,6 +8,13 @@ All notable changes to this project will be documented here.
 
 ---
 
+## [0.35.1] — 2026-03-30
+
+### Added
+- `max_loss_pct` field to `TraderConfig` — a hard per-position exit guard that fires when price drops ≥ N% below the entry price, regardless of the trailing-stop level. Catches gap-down opens and poll-interval slippage that can push realized loss past the configured trailing stop. Exposed as "Max loss from entry (%)" in the AutoTrader form. Added unit test `test_max_loss_guard_fires` (#23)
+
+---
+
 ## [0.35.0] — 2026-03-30
 
 ### Added

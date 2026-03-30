@@ -86,6 +86,9 @@ class TraderConfig:
     # Time stop
     time_stop_minutes:     float     = 0.0   # 0 = disabled
 
+    # Hard max-loss guard (absolute, from entry — catches gap-downs that blow past the trailing stop)
+    max_loss_pct:          float     = 0.0   # 0 = disabled; e.g. 5.0 = exit if down ≥ 5 % from entry
+
 
 @dataclass
 class TradeLog:
@@ -551,6 +554,21 @@ class AutoTrader:
                         self._on_close(s.pnl)
                     self._stop_event.set()
                     break
+
+                # ── Hard max-loss guard (catches gap-downs past trailing stop) ──
+                if cfg.max_loss_pct > 0 and s.entry_price > 0:
+                    loss_pct = (s.entry_price - price) / s.entry_price * 100
+                    if loss_pct >= cfg.max_loss_pct:
+                        self._place_sell(s.symbol, s.qty_remaining)
+                        s.state = TraderState.SOLD
+                        self._log("SELL", price,
+                                  f"Max-loss guard triggered @ ${price:.2f} "
+                                  f"({loss_pct:.2f}% below entry ${s.entry_price:.2f})"
+                                  f" | P&L ${s.pnl:.2f}")
+                        if self._on_close:
+                            self._on_close(s.pnl)
+                        self._stop_event.set()
+                        break
 
                 # ── Trailing stop ─────────────────────────────────────────
                 if price <= s.stop_floor:

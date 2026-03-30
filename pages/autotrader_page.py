@@ -116,6 +116,10 @@ def render(mt, get_price_fn, buy_fn, sell_fn, get_bars_fn, get_equity_fn, broker
                                                  help="0 = disabled. Once up this %, move stop floor to entry price.")
             at_time_stop     = xc4.number_input("Time stop (minutes)", min_value=0, value=0, step=5,
                                                  help="0 = disabled. Exit after this many minutes.")
+            xc5, _           = st.columns(2)
+            at_max_loss_pct  = xc5.number_input("Max loss from entry (%)", min_value=0.0, value=0.0, step=0.5,
+                                                 help="0 = disabled. Hard exit if price drops this % below entry — "
+                                                      "catches gap-downs that blow past the trailing stop.")
 
         col_start, col_stop_all = st.columns(2)
         start_btn    = col_start.form_submit_button("▶ Start", type="primary")
@@ -138,6 +142,7 @@ def render(mt, get_price_fn, buy_fn, sell_fn, get_bars_fn, get_equity_fn, broker
                 tp_qty_fraction       = at_tp_frac,
                 breakeven_trigger_pct = at_be_pct,
                 time_stop_minutes     = float(at_time_stop),
+                max_loss_pct          = at_max_loss_pct,
             )
             try:
                 mt.start(at_symbol, int(at_qty), config=cfg)
