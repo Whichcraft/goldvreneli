@@ -243,8 +243,8 @@ class AutoTrader:
             raise ValueError(f"qty must be at least 1, got {qty}")
         if not symbol or not symbol.strip():
             raise ValueError("symbol must not be empty")
-        if self.status.state == TraderState.WATCHING:
-            raise RuntimeError("AutoTrader already running.")
+        if self.status.state in (TraderState.ENTERING, TraderState.WATCHING):
+            raise RuntimeError(f"AutoTrader already active ({self.status.state.value}).")
 
         if config is None:
             config = TraderConfig(

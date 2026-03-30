@@ -454,6 +454,43 @@ if broker == "Alpaca":
         st.error(f"⚠️ LIVE TRADING MODE — real money at risk")
     st.title(f"Portfolio Dashboard (Alpaca {_mode_label})")
 
+    # ── Shared broker callables (used by AutoTrader, Portfolio Mode, Scanner) ─
+    def alpaca_get_price(symbol: str) -> float:
+        from alpaca.data.requests import StockLatestQuoteRequest, StockLatestTradeRequest
+        quote = data_client.get_stock_latest_quote(StockLatestQuoteRequest(symbol_or_symbols=symbol))
+        price = float(quote[symbol].ask_price or quote[symbol].bid_price)
+        if price <= 0:
+            trade = data_client.get_stock_latest_trade(StockLatestTradeRequest(symbol_or_symbols=symbol))
+            price = float(trade[symbol].price)
+        return price
+
+    def alpaca_buy(symbol: str, qty: int):
+        trading_client.submit_order(MarketOrderRequest(
+            symbol=symbol, qty=qty,
+            side=OrderSide.BUY, time_in_force=TimeInForce.DAY
+        ))
+
+    def alpaca_sell(symbol: str, qty: int):
+        trading_client.submit_order(MarketOrderRequest(
+            symbol=symbol, qty=qty,
+            side=OrderSide.SELL, time_in_force=TimeInForce.DAY
+        ))
+
+    def alpaca_get_bars(symbol: str) -> pd.DataFrame:
+        bars = data_client.get_stock_bars(StockBarsRequest(
+            symbol_or_symbols=symbol,
+            timeframe=TimeFrame.Day,
+            start=datetime.now() - timedelta(days=30),
+        )).df
+        bars = bars.reset_index(level=0, drop=True)
+        return bars[["open", "high", "low", "close", "volume"]]
+
+    # Migrate old single-trader session key
+    if "autotrader" in st.session_state and "multitrader" not in st.session_state:
+        del st.session_state["autotrader"]
+
+    mt = get_multi_trader(st.session_state, alpaca_get_price, alpaca_buy, alpaca_sell, alpaca_get_bars)
+
     # ── Page: Portfolio ───────────────────────────────────────────────────────
     if page == "Portfolio":
         day_pl     = float(account.equity) - float(account.last_equity)
@@ -582,43 +619,6 @@ if broker == "Alpaca":
         st.subheader("AutoTrader — Multi-Position Manager")
         st.caption("Enters positions and exits automatically via trailing stop, take-profit, breakeven, or time stop.")
 
-        def alpaca_get_price(symbol: str) -> float:
-            from alpaca.data.requests import StockLatestQuoteRequest, StockLatestTradeRequest
-            quote = data_client.get_stock_latest_quote(StockLatestQuoteRequest(symbol_or_symbols=symbol))
-            price = float(quote[symbol].ask_price or quote[symbol].bid_price)
-            if price <= 0:  # after hours: ask/bid may both be 0 — fall back to last trade
-                trade = data_client.get_stock_latest_trade(StockLatestTradeRequest(symbol_or_symbols=symbol))
-                price = float(trade[symbol].price)
-            return price
-
-        def alpaca_buy(symbol: str, qty: int):
-            trading_client.submit_order(MarketOrderRequest(
-                symbol=symbol, qty=qty,
-                side=OrderSide.BUY, time_in_force=TimeInForce.DAY
-            ))
-
-        def alpaca_sell(symbol: str, qty: int):
-            trading_client.submit_order(MarketOrderRequest(
-                symbol=symbol, qty=qty,
-                side=OrderSide.SELL, time_in_force=TimeInForce.DAY
-            ))
-
-        def alpaca_get_bars(symbol: str) -> pd.DataFrame:
-            bars = data_client.get_stock_bars(StockBarsRequest(
-                symbol_or_symbols=symbol,
-                timeframe=TimeFrame.Day,
-                start=datetime.now() - timedelta(days=30),
-            )).df
-            bars = bars.reset_index(level=0, drop=True)
-            return bars[["open", "high", "low", "close", "volume"]]
-
-        # Migrate old single-trader session key
-        if "autotrader" in st.session_state and "multitrader" not in st.session_state:
-            del st.session_state["autotrader"]
-
-        mt = get_multi_trader(st.session_state,
-                              alpaca_get_price, alpaca_buy, alpaca_sell, alpaca_get_bars)
-
         # ── New position form ─────────────────────────────────────────────
         # Handle multi-symbol prefill from Scanner.
         # at_prefill_list / at_prefill are one-shot signals written by the
@@ -636,7 +636,7 @@ if broker == "Alpaca":
         elif _prefill_single:
             st.session_state["at_current_symbol"] = _prefill_single
 
-        _default_symbol = st.session_state.get("at_current_symbol", env_get("AT_SYMBOL", ""))
+        _default_symbol = st.session_state.get("at_current_symbol") or env_get("AT_SYMBOL", "")
 
         with st.form("at_config"):
             st.markdown("**New Position**")
@@ -844,36 +844,6 @@ if broker == "Alpaca":
             "Each slot is sized at a fixed % of equity. On exit, the next best candidate is opened."
         )
 
-        def alpaca_get_price_pm(symbol: str) -> float:
-            from alpaca.data.requests import StockLatestQuoteRequest, StockLatestTradeRequest
-            quote = data_client.get_stock_latest_quote(StockLatestQuoteRequest(symbol_or_symbols=symbol))
-            price = float(quote[symbol].ask_price or quote[symbol].bid_price)
-            if price <= 0:
-                trade = data_client.get_stock_latest_trade(StockLatestTradeRequest(symbol_or_symbols=symbol))
-                price = float(trade[symbol].price)
-            return price
-
-        def alpaca_buy_pm(symbol: str, qty: int):
-            trading_client.submit_order(MarketOrderRequest(
-                symbol=symbol, qty=qty,
-                side=OrderSide.BUY, time_in_force=TimeInForce.DAY
-            ))
-
-        def alpaca_sell_pm(symbol: str, qty: int):
-            trading_client.submit_order(MarketOrderRequest(
-                symbol=symbol, qty=qty,
-                side=OrderSide.SELL, time_in_force=TimeInForce.DAY
-            ))
-
-        def alpaca_get_bars_pm(symbol: str) -> pd.DataFrame:
-            bars = data_client.get_stock_bars(StockBarsRequest(
-                symbol_or_symbols=symbol,
-                timeframe=TimeFrame.Day,
-                start=datetime.now() - timedelta(days=30),
-            )).df
-            bars = bars.reset_index(level=0, drop=True)
-            return bars[["open", "high", "low", "close", "volume"]]
-
         def alpaca_get_equity() -> float:
             return float(trading_client.get_account().equity)
 
@@ -936,10 +906,10 @@ if broker == "Alpaca":
             pm = get_portfolio_manager(
                 st.session_state,
                 data_client,
-                alpaca_get_price_pm,
-                alpaca_buy_pm,
-                alpaca_sell_pm,
-                alpaca_get_bars_pm,
+                alpaca_get_price,
+                alpaca_buy,
+                alpaca_sell,
+                alpaca_get_bars,
                 alpaca_get_equity,
                 target_slots      = int(pm_slots),
                 slot_pct          = float(pm_slot_pct),
@@ -1154,12 +1124,66 @@ if broker == "Alpaca":
                 key="scanner_table",
             )
 
-            # Multi-select → AutoTrader
+            # Multi-select → actions
             rows = selection.selection.get("rows", [])
-            selected_symbols = [results.index[r] for r in rows]
-            if selected_symbols:
-                st.info(f"Selected: {', '.join(f'**{s}**' for s in selected_symbols)}")
-                if st.button(f"▶ Send {len(selected_symbols)} symbol(s) to AutoTrader", type="primary"):
+            selected_symbols = [results.index[r] for r in rows if r < len(results)]
+            n_selected = len(selected_symbols)
+
+            # ── Quick Invest ──────────────────────────────────────────────
+            with st.expander("⚡ Quick Invest", expanded=True):
+                qi1, qi2, qi3 = st.columns(3)
+                qi_dollar = qi1.number_input(
+                    "$ per position", min_value=100.0, step=100.0,
+                    value=float(env_get("PM_SLOT_DOLLAR", "3000")),
+                    key="qi_dollar",
+                )
+                qi_stop = qi2.number_input(
+                    "Trailing stop %", min_value=0.1, max_value=20.0, step=0.1,
+                    value=float(env_get("AT_THRESHOLD", "0.5")),
+                    key="qi_stop",
+                )
+                max_n = len(results)
+                qi_default_n = n_selected if n_selected else min(5, max_n)
+                qi_n = qi3.number_input(
+                    "Top N to invest", min_value=1, max_value=max_n,
+                    value=qi_default_n, key="qi_n",
+                    help="If rows are selected in the table, those symbols are used. Otherwise the top N by score.",
+                )
+
+                syms_to_invest = (
+                    selected_symbols[:int(qi_n)] if n_selected
+                    else list(results.index[:int(qi_n)])
+                )
+                total_invest = qi_dollar * len(syms_to_invest)
+                st.caption(
+                    f"**{', '.join(syms_to_invest)}**  —  "
+                    f"${qi_dollar:,.0f} each  =  **${total_invest:,.0f} total**"
+                )
+
+                if st.button("⚡ Invest Now", type="primary", key="qi_invest"):
+                    errors, opened = [], []
+                    for sym in syms_to_invest:
+                        try:
+                            price = alpaca_get_price(sym)
+                            qty   = max(1, int(qi_dollar / price))
+                            cfg   = TraderConfig(
+                                stop_value    = float(qi_stop),
+                                poll_interval = float(env_get("AT_POLL", "5")),
+                            )
+                            mt.start(sym, qty, config=cfg)
+                            opened.append(sym)
+                        except Exception as e:
+                            errors.append(f"{sym}: {e}")
+                    if errors:
+                        st.error("Errors: " + "; ".join(errors))
+                    if opened:
+                        st.success(f"Opened {len(opened)} position(s): {', '.join(opened)}")
+                        st.session_state.nav_page = "AutoTrader"
+                        st.rerun()
+
+            # ── Send to AutoTrader queue ──────────────────────────────────
+            if n_selected:
+                if st.button(f"▶ Configure & queue {n_selected} symbol(s) in AutoTrader"):
                     st.session_state.at_prefill_list = selected_symbols
                     st.session_state.nav_page        = "AutoTrader"
                     st.rerun()

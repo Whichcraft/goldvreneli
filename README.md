@@ -144,14 +144,21 @@ Switching to Live requires a confirmation step ("You're going to trade with your
 
 ### 🤖 AutoTrader
 
-Trailing-stop automated position manager. Buys on start, tracks peak price, sells when drawdown exceeds threshold.
+AutoTrader manages **one position at a time**. You tell it the symbol, size, and stop settings; it buys immediately, then watches the price in a background thread. As long as the price keeps rising it adjusts the stop floor upward (trailing stop). The moment the price drops below the stop, it sells everything and reports the P&L.
+
+Multiple AutoTrader instances run in parallel under a single **MultiTrader** session. You can start a new position for any symbol while others are still running.
+
+**Typical flow**
+1. Run the Scanner, select the best candidates, click *Quick Invest* (or *Configure & Queue*)
+2. Set dollar amount and stop % — click **Start**
+3. Watch the positions table; each position shows current price, peak, stop floor, and P&L live
 
 **Stop modes**
 
 | Mode | Description |
 |------|-------------|
-| PCT | Sell when price drops N% below peak |
-| ATR | Sell when price drops N × ATR(14) below peak |
+| PCT | Sell when price drops N% below peak (e.g. 0.5%) |
+| ATR | Sell when price drops N × ATR(14) dollars below peak — adapts to volatility |
 
 **Entry modes**
 
@@ -159,16 +166,15 @@ Trailing-stop automated position manager. Buys on start, tracks peak price, sell
 |------|-------------|
 | Market | Buy immediately at market price |
 | Limit | Place limit order; cancel and re-enter at market after timeout |
-| Scale | Buy in N tranches spaced by interval (dollar-cost average into position) |
+| Scale | Buy in N equal tranches spaced by interval (dollar-cost averages into position) |
 
-**Exit targets**
+**Optional exit rules** (stack on top of the trailing stop)
 
 | Setting | Description |
 |---------|-------------|
-| Take-profit trigger % | Sell a fraction of the position when up this % |
-| Fraction to sell at TP | e.g. 0.5 = sell half, trail the rest |
-| Breakeven trigger % | Once up this %, move stop floor to entry (lock in breakeven) |
-| Time stop (minutes) | Exit after this many minutes regardless of price |
+| Take-profit % | Sell a fraction of the position when up this % — let the rest trail |
+| Breakeven % | Once up this %, move stop floor to entry price (locks in break-even) |
+| Time stop | Exit after this many minutes regardless of price |
 
 **Qty sizing**
 
@@ -176,43 +182,43 @@ Trailing-stop automated position manager. Buys on start, tracks peak price, sell
 |------|-------------|
 | Shares | Fixed number of shares |
 | Dollar amount | Converts to shares at current price |
-| Risk % | Sizes so a full stop-out = N% of equity |
+| Risk % | Sizes so a full stop-out costs exactly N% of your account equity |
 
-**Daily loss limit** — set in Settings; blocks new entries once realized losses reach the threshold.
+**Daily loss limit** — set in Settings; blocks new entries once cumulative realized losses for the session reach the limit.
 
-**Multi-symbol queue** — select multiple Scanner candidates and send them to AutoTrader. Symbols load one at a time; start each to advance the queue.
+**Symbol queue** — configure and start one symbol; the next in your selection pre-fills the form automatically.
 
 ### 📈 Portfolio Mode
 
-Fully automated multi-position manager. Runs the scanner, opens positions in the top picks, and replaces each position when it closes.
+Portfolio Mode is **fully autonomous**. You configure it once and it runs indefinitely: scanning for the best stocks, opening positions, managing each with a trailing stop, and replacing positions as they close — without any manual intervention.
 
 **How it works**
 
-1. On start, scans for candidates and opens up to *target slots* positions simultaneously
-2. Each position is sized at *slot %* of current account equity (default: 10 slots × 10%)
-3. Every position is managed by AutoTrader with the configured trailing stop
-4. When a position closes (stop triggered), the next scanner pick is opened automatically
-5. If no qualifying candidates exist, the slot stays empty until the next rescan
+1. Click **Start All** (or Start Sequential) — triggers a scanner run across ~600 symbols
+2. The top-ranked candidates are opened immediately, each sized at the configured dollar amount (e.g. $3,000) or % of equity
+3. Every position is independently managed by AutoTrader with the trailing stop you configured
+4. When a position closes (stop hit), Portfolio Mode immediately opens the next-best scanner pick
+5. Candidates older than 30 minutes are automatically refreshed with a new scan
 
-**Start modes**
+**When to use Start All vs Start Sequential**
 
-| Button | Behaviour |
-|--------|-----------|
-| Start Sequential | Open the first slot, then the next when each closes (one active at a time per open) |
-| Start All | Open all slots simultaneously at launch |
+| Button | When to use |
+|--------|-------------|
+| Start All | Normal use — opens all N slots at the same time |
+| Start Sequential | Cautious entry — fills one slot at a time as each prior one closes |
 
 **Configuration**
 
 | Setting | Default | Description |
 |---------|---------|-------------|
 | Target slots | 10 | Maximum simultaneous positions |
-| Slot sizing | % of equity | Choose "% of equity" or "Fixed $ per slot" (e.g. $3000/slot) |
-| Stop mode | PCT | PCT or ATR trailing stop |
+| Slot sizing | % of equity | Switch to "Fixed $ per slot" to invest e.g. $3,000 per position |
+| Stop mode | PCT | PCT or ATR trailing stop applied to every position |
 | Trailing stop value | 0.5% | % drop from peak (PCT) or ATR multiplier |
 | Poll interval | 5s | How often each position checks the price |
-| Daily loss limit | off | Halts new entries after this cumulative loss |
+| Daily loss limit | off | Halts new entries after this cumulative realized loss |
 
-**Candidate list** — scanned fresh at startup and refreshed automatically if more than 30 minutes old. Already-active symbols are skipped when picking the next candidate.
+**Candidate list** — scanned fresh at startup and re-scanned automatically when older than 30 minutes. Already-open symbols are skipped; the next-best is chosen instead.
 
 ### 🔍 Scanner
 
@@ -244,7 +250,9 @@ Scans ~600 liquid US stocks, ETFs, and ADRs using daily Alpaca bars and pandas-t
 
 **Stale warning** — if results are more than 30 minutes old, a warning appears.
 
-**Sending to AutoTrader** — select rows in the results table (multi-row), click *Send N symbol(s) to AutoTrader*. Symbols are queued.
+**⚡ Quick Invest** — the fastest path to investing: set a dollar amount, trailing stop %, and number of top positions, then click *Invest Now*. Positions open immediately without going through the AutoTrader form. Uses your current row selection, or falls back to the top N by score if nothing is selected.
+
+**Configure & Queue** — select rows, click *Configure & Queue* to send them to AutoTrader where you can review and adjust settings for each before starting.
 
 ### 🧪 Backtest
 

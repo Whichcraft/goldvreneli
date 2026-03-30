@@ -91,6 +91,7 @@ class PortfolioManager:
         self._running:        bool                  = False
         self._candidates:     List[str]             = []
         self._candidates_ts:  Optional[datetime]    = None
+        self._claimed:        set                   = set()  # claimed but not yet in _multi
         self._lock            = threading.Lock()
         self._scan_lock       = threading.Lock()   # prevents concurrent rescans
         self._log_entries:    List[Dict]            = []
@@ -204,14 +205,19 @@ class PortfolioManager:
             return (datetime.now() - self._candidates_ts).total_seconds() > _SCAN_MAX_AGE_S
 
     def _next_candidate(self) -> Optional[str]:
-        """Return top candidate not currently held or entering."""
+        """Return top candidate not currently held, entering, or claimed.
+
+        Atomically marks the returned symbol as claimed so parallel calls
+        cannot return the same symbol before _multi.start() is called.
+        """
         occupied = {
             sym for sym, s in self._multi.statuses().items()
             if s.state in (TraderState.ENTERING, TraderState.WATCHING)
         }
         with self._lock:
             for sym in self._candidates:
-                if sym not in occupied:
+                if sym not in occupied and sym not in self._claimed:
+                    self._claimed.add(sym)
                     return sym
         return None
 
@@ -250,8 +256,12 @@ class PortfolioManager:
 
         try:
             self._multi.start(sym, qty, config=self._config, on_close=on_close)
+            with self._lock:
+                self._claimed.discard(sym)  # now tracked by _multi
             self._log(f"Opened {sym} — {qty} sh @ ~${price:.2f}  (≈${qty * price:,.0f})")
         except Exception as e:
+            with self._lock:
+                self._claimed.discard(sym)
             self._log(f"Could not open {sym}: {e}", "ERROR")
             if self._running:
                 threading.Thread(target=self._open_one_slot, daemon=True).start()
