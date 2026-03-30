@@ -221,7 +221,7 @@ if page == "Settings":
             try:
                 from alpaca.trading.client import TradingClient
                 acct = TradingClient(api_key=key, secret_key=secret, paper=paper).get_account()
-                key_msgs.append(("ok", f"✅ {label} keys OK — account {acct.id[:8]}… ({acct.status})"))
+                key_msgs.append(("ok", f"✅ {label} keys OK — account {str(acct.id)[:8]}… ({acct.status})"))
             except Exception as _e:
                 key_msgs.append(("err", f"❌ {label} keys invalid: {_e}"))
 
