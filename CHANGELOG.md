@@ -8,6 +8,23 @@ All notable changes to this project will be documented here.
 
 ---
 
+## [0.20.0] — 2026-03-30
+
+### Added
+- **Scanner: ⚡ Quick Invest panel** — set $ per position + trailing stop % + N, click *Invest Now* to open positions immediately without going through the AutoTrader form; uses selected rows or falls back to top N by score
+- *Configure & Queue* button replaces the old "Send to AutoTrader" for the manual-review flow
+
+### Fixed
+- **`PortfolioManager` parallel duplicate picks** — `_next_candidate()` had no atomicity between selection and open; all threads in *Start All* could grab the same symbol. Fixed with `_claimed` set: symbol is reserved atomically on selection and released once `_multi.start()` succeeds or fails.
+- **`AutoTrader.start()` ENTERING guard** — only blocked on `WATCHING`; a second call during `ENTERING` would start a duplicate monitor thread. Now raises on both `ENTERING` and `WATCHING`.
+- **`at_current_symbol` empty-string fallback** — `dict.get(key, default)` doesn't treat empty string as missing; swapped to `or` so an empty stored symbol correctly falls back to `AT_SYMBOL` env.
+- **Duplicate broker function definitions** — `alpaca_get_price`, `alpaca_buy`, `alpaca_sell`, `alpaca_get_bars` were defined three times (AutoTrader, Portfolio Mode, Scanner). Moved to top-level Alpaca section; all pages now share one definition.
+
+### Docs
+- README: rewrote AutoTrader and Portfolio Mode sections — clearer explanation of what each does, typical flows, and when to use Start All vs Sequential
+
+---
+
 ## [0.19.0] — 2026-03-30
 
 ### Added
