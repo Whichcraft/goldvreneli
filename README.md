@@ -98,6 +98,10 @@ SCAN_VOL_MULT=1.0
 SCAN_SMA20_TOL=3.0
 SCAN_MIN_RET5D=-1.0
 SCAN_WATCHLIST=
+
+# Portfolio Mode defaults
+PM_TARGET_SLOTS=10
+PM_SLOT_PCT=10.0
 ```
 
 Get Alpaca paper API keys at [alpaca.markets](https://alpaca.markets) → Paper Trading → API Keys.
