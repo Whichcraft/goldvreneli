@@ -8,6 +8,15 @@ All notable changes to this project will be documented here.
 
 ---
 
+## [0.34.1] — 2026-03-30
+
+### Fixed
+- Trade history now refreshes automatically when an auto-sell fires; fragment detects new session count (#16)
+- Auto-generated Streamlit page-link nav hidden from top of sidebar via CSS (#22)
+- Installer now skips deploy and pip-install when already up to date; both git-pull fast path and fallback clone path (#24)
+
+---
+
 ## [0.34.0] — 2026-03-30
 
 ### Fixed

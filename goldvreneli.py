@@ -33,6 +33,10 @@ from ibkr_data import IBKRDataClient
 # ── Config ────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title=f"Goldvreneli Trading v{__version__}", layout="wide")
 
+# Hide the auto-generated Streamlit page-link nav at the top of the sidebar
+st.markdown("""<style>[data-testid="stSidebarNav"] { display: none; }</style>""",
+            unsafe_allow_html=True)
+
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown(f"## Goldvreneli `v{__version__}`")

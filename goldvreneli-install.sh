@@ -323,10 +323,9 @@ do_update() {
             NEW_VERSION="$(grep -oP '(?<=__version__ = ")[^"]+' "$INSTALL_DIR/version.py" 2>/dev/null || echo "unknown")"
             if [[ "$NEW_VERSION" == "$CUR_VERSION" ]]; then
                 success "Already up to date (v$CUR_VERSION)."
-            else
-                success "Pulled v$CUR_VERSION → v$NEW_VERSION"
+                return
             fi
-            # Skip the clone-and-deploy path
+            success "Pulled v$CUR_VERSION → v$NEW_VERSION"
             patch_env_paths
             info "Updating Python dependencies…"
             cd "$INSTALL_DIR"
@@ -356,7 +355,7 @@ do_update() {
 
     if [[ "$NEW_VERSION" == "$CUR_VERSION" ]]; then
         success "Already up to date (v$CUR_VERSION)."
-        # Still update deps in case requirements changed
+        return
     elif [[ "$NEW_VERSION" != "unknown" && "$CUR_VERSION" != "unknown" ]] && \
          ! _gw_version_gt "$NEW_VERSION" "$CUR_VERSION"; then
         warn "Remote is v${NEW_VERSION}, installed is v${CUR_VERSION} — not downgrading."

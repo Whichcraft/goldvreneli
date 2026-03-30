@@ -71,36 +71,48 @@ Business logic is already fully decoupled from the UI by design but has zero tes
 
 ## Pending / New
 
-### 14. Activity Log: add Symbol column
+### ~~14. Activity Log: add Symbol column~~ ✓ fixed in 0.34.0
 Add a Symbol column to the Activity Log table so each entry shows which ticker the action relates to.
 
-### 15. Activity Log: rename "New peak $ | stop floor $" column
+### ~~15. Activity Log: rename "New peak $ | stop floor $" column~~ ✓ fixed in 0.34.0
 The label "stop floor $" is ambiguous — clarify to "new stop floor $" (or similar) so it's obvious this is the updated trailing stop floor, not the original stop.
 
-### 16. Trade history: update on auto-sell
+### ~~16. Trade history: update on auto-sell~~ ✓ fixed in 0.34.1
 The trade history table doesn't refresh when an AutoTrader sells automatically. Trigger a history update when an auto-sell fires so the table stays current without a manual rerun.
 
 ### 17. Scan history window
 Add a scan history view that shows previous scan runs (timestamp, filter settings used, number of results) so users can compare or replay past scans.
 
-### 18. Rename "Realized losses today" → wins framing
+### ~~18. Rename "Realized losses today" → wins framing~~ ✓ fixed in 0.34.0
 "Realized losses today" is discouraging. Rename to something positive, e.g. "Realized P&L today" or "Today's closed trades", so winning days feel rewarding rather than loss-focused.
 
 ### 19. Move Activity Log to a dedicated `activity_tracker` module
 Extract the activity-log logic (state, append, render) from page files into a new `activity_tracker.py` module to keep pages thin and the tracker reusable.
 
-### 20. Group Backtest + future test tools under a "Testing" section
-Move the Backtest page (historic data replay) down and create a new top-level "Testing" section in the nav that groups it with any future test/simulation tools (paper trading replay, strategy comparison, etc.).
+### 20. Group Backtest + Test Mode under a "Testing" section in the sidebar
+Move the Backtest page and Paper Trading / Test Mode into a dedicated "Testing" collapsible group in the left sidebar nav, separate from the live-trading pages. Test Mode should let users run AutoTrader logic against live prices without placing real orders (dry-run / paper mode).
+
+### 21. Activity Log: persistent left-sidebar panel
+Surface the Activity Log as a persistent panel in the left sidebar so it's visible from any page, not just when scrolling down the AutoTrader page. Should show the last N entries and auto-refresh.
+
+### ~~22. Remove default Streamlit page-link nav from top of sidebar~~ ✓ fixed in 0.34.1
+The auto-generated page links Streamlit renders at the top of the sidebar duplicate the custom nav and clutter the UI. Hide them (e.g. via `st.set_page_config` options or CSS) so only the custom navigation is shown.
+
+### 23. Allow realized loss to exceed trailing-stop value
+Investigate scenarios where the actual realized loss on a trade can be larger than the configured trailing-stop threshold (e.g. gap-down opens, illiquid fills, scale-in entries where stop is calculated from first fill only). Document the cases and decide whether to add a hard max-loss guard per position.
+
+### ~~24. Installer deploys even when already up to date~~ ✓ fixed in 0.34.1
+When the installer reports "Already up to date", it still proceeds to "Deploying updated production files…" and runs dependency updates unnecessarily. The deploy + pip-install steps should be skipped entirely when no new version was fetched.
 
 ---
 
 ## Small wins
 
-### 11. Reduce `fetch_bars()` lookback from 90 to 60 days
+### ~~11. Reduce `fetch_bars()` lookback from 90 to 60 days~~ ✓ fixed in 0.34.0
 Most indicators use ≤ 20 days of data; `score_symbol()` requires only 52 bars. Fetching 90 days wastes bandwidth and slows scans.
 
-### 12. Surface "insufficient history" reason in scanner
+### ~~12. Surface "insufficient history" reason in scanner~~ ✓ fixed in 0.34.0
 Stocks with < 52 bars silently drop from results with no explanation. Add a count or expandable list of symbols skipped for insufficient history.
 
-### 13. Warn on corrupted `MockBroker` JSON
+### ~~13. Warn on corrupted `MockBroker` JSON~~ ✓ fixed in 0.34.0
 Currently falls back to an empty session list silently. Should log a visible warning so users know backtest history was lost.

@@ -291,9 +291,14 @@ def render(mt, get_price_fn, buy_fn, sell_fn, get_bars_fn, get_equity_fn, broker
         else:
             st.caption("No live trades recorded yet.")
 
-        # Auto-refresh the fragment while any position is active
-        if any(s.state in (TraderState.ENTERING, TraderState.WATCHING)
-               for s in mt.statuses().values()):
+        # Auto-refresh the fragment while any position is active, or once more
+        # when the session count changes (catches auto-sell writing a new entry)
+        session_count = len(live_sessions)
+        prev_count = st.session_state.get("_hist_session_count", session_count)
+        st.session_state["_hist_session_count"] = session_count
+        has_active = any(s.state in (TraderState.ENTERING, TraderState.WATCHING)
+                         for s in mt.statuses().values())
+        if has_active or session_count != prev_count:
             time.sleep(5)
             st.rerun()
 
