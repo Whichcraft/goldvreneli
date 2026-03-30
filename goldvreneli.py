@@ -1,3 +1,4 @@
+import os
 import time
 import streamlit as st
 import plotly.graph_objects as go
@@ -632,7 +633,7 @@ if broker == "Alpaca":
             else:
                 rc1, rc2, rc3 = st.columns(3)
                 at_equity    = rc1.number_input("Account equity ($)", min_value=1.0,
-                                                 value=float(account.equity) if 'account' in dir() else 10000.0,
+                                                 value=float(account.equity) if 'account' in locals() else 10000.0,
                                                  step=500.0)
                 at_risk_pct  = rc2.number_input("Risk per trade (%)", min_value=0.1,
                                                  max_value=10.0, value=1.0, step=0.1)

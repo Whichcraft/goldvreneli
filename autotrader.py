@@ -119,6 +119,7 @@ class AutoTraderStatus:
     # Take-profit
     tp_price:       float = 0.0
     tp_executed:    bool  = False
+    realized_pnl:   float = 0.0   # cumulative P&L from partial exits (e.g. take-profit)
 
     # Breakeven
     breakeven_active: bool = False
@@ -442,7 +443,7 @@ class AutoTrader:
             try:
                 price = self._get_price(s.symbol)
                 s.current_price = price
-                s.pnl           = (price - s.entry_price) * s.qty_remaining
+                s.pnl           = (price - s.entry_price) * s.qty_remaining + s.realized_pnl
 
                 # New peak
                 if price > s.peak_price:
@@ -472,10 +473,11 @@ class AutoTrader:
                     s.qty_remaining -= sell_qty
                     s.tp_executed    = True
                     tp_pnl           = (price - s.entry_price) * sell_qty
+                    s.realized_pnl  += tp_pnl
                     self._log("TAKE_PROFIT", price,
                               f"Take-profit @ ${price:.2f} | sold {sell_qty} shares | partial P&L ${tp_pnl:.2f}")
                     if s.qty_remaining <= 0:
-                        s.pnl   = tp_pnl
+                        s.pnl   = s.realized_pnl   # all shares exited via TP
                         s.state = TraderState.SOLD
                         if self._on_close:
                             self._on_close(s.pnl)
