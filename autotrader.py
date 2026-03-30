@@ -483,6 +483,27 @@ class AutoTrader:
         # Initial ATR fetch and stop floor
         self._update_stop_floor()
 
+        # Immediate max-loss check after entry — catches gap-downs that occur
+        # during scale/limit entry before the monitor loop starts
+        if cfg.max_loss_pct > 0 and s.entry_price > 0 and not self._stop_event.is_set():
+            try:
+                post_entry_price = self._get_price(s.symbol)
+                s.current_price  = post_entry_price
+                s.pnl = (post_entry_price - s.entry_price) * s.qty_remaining
+                loss_pct = (s.entry_price - post_entry_price) / s.entry_price * 100
+                if loss_pct >= cfg.max_loss_pct:
+                    self._place_sell(s.symbol, s.qty_remaining)
+                    s.state = TraderState.SOLD
+                    self._log("SELL", post_entry_price,
+                              f"Max-loss guard triggered immediately after entry @ ${post_entry_price:.2f} "
+                              f"({loss_pct:.2f}% below entry ${s.entry_price:.2f}) | P&L ${s.pnl:.2f}")
+                    if self._on_close:
+                        self._on_close(s.pnl)
+                    self._stop_event.set()
+                    return
+            except Exception:
+                pass
+
         # Take-profit price
         if cfg.tp_trigger_pct > 0:
             s.tp_price = s.entry_price * (1 + cfg.tp_trigger_pct / 100)
@@ -542,20 +563,8 @@ class AutoTrader:
                     # Disable TP; trail remaining shares
                     cfg.tp_trigger_pct = 0
 
-                # ── Time stop ─────────────────────────────────────────────
-                if (cfg.time_stop_minutes > 0
-                        and s.entry_time
-                        and (datetime.now() - s.entry_time).total_seconds() >= cfg.time_stop_minutes * 60):
-                    self._place_sell(s.symbol, s.qty_remaining)
-                    s.state = TraderState.SOLD
-                    self._log("TIME_STOP", price,
-                              f"Time stop after {cfg.time_stop_minutes:.0f}min | P&L ${s.pnl:.2f}")
-                    if self._on_close:
-                        self._on_close(s.pnl)
-                    self._stop_event.set()
-                    break
-
-                # ── Hard max-loss guard (catches gap-downs past trailing stop) ──
+                # ── Hard max-loss guard — checked BEFORE time-stop so it always
+                #    takes priority over an expiring timer while in deep loss ──
                 if cfg.max_loss_pct > 0 and s.entry_price > 0:
                     loss_pct = (s.entry_price - price) / s.entry_price * 100
                     if loss_pct >= cfg.max_loss_pct:
@@ -569,6 +578,19 @@ class AutoTrader:
                             self._on_close(s.pnl)
                         self._stop_event.set()
                         break
+
+                # ── Time stop ─────────────────────────────────────────────
+                if (cfg.time_stop_minutes > 0
+                        and s.entry_time
+                        and (datetime.now() - s.entry_time).total_seconds() >= cfg.time_stop_minutes * 60):
+                    self._place_sell(s.symbol, s.qty_remaining)
+                    s.state = TraderState.SOLD
+                    self._log("TIME_STOP", price,
+                              f"Time stop after {cfg.time_stop_minutes:.0f}min | P&L ${s.pnl:.2f}")
+                    if self._on_close:
+                        self._on_close(s.pnl)
+                    self._stop_event.set()
+                    break
 
                 # ── Trailing stop ─────────────────────────────────────────
                 if price <= s.stop_floor:
@@ -591,7 +613,28 @@ class AutoTrader:
                 self._stop_event.set()
                 break
 
-            time.sleep(cfg.poll_interval)
+            # ── Sleep: when max_loss is active poll in 1 s sub-ticks so a
+            #    fast-moving price cannot blow past the guard for a full
+            #    poll_interval before being caught. ─────────────────────────
+            if cfg.max_loss_pct > 0:
+                sub_tick = min(1.0, cfg.poll_interval)
+                elapsed  = 0.0
+                while elapsed < cfg.poll_interval and not self._stop_event.is_set():
+                    time.sleep(sub_tick)
+                    elapsed += sub_tick
+                    # Quick max-loss re-check between full polls
+                    if s.entry_price > 0:
+                        try:
+                            quick_price = self._get_price(s.symbol)
+                        except Exception:
+                            break
+                        s.current_price = quick_price
+                        s.pnl = (quick_price - s.entry_price) * s.qty_remaining + s.realized_pnl
+                        loss_pct = (s.entry_price - quick_price) / s.entry_price * 100
+                        if loss_pct >= cfg.max_loss_pct:
+                            break  # let the main loop body handle it next iteration
+            else:
+                time.sleep(cfg.poll_interval)
 
     def _log(self, action: str, price: float, note: str = ""):
         entry = TradeLog(timestamp=datetime.now(), action=action, price=price, note=note, symbol=self.status.symbol)

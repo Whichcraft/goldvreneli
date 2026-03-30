@@ -334,6 +334,25 @@ class TestAutoTraderLifecycle:
         reached = wait_for_state(at, TraderState.ERROR, timeout=5)
         assert reached, f"Stuck in {at.status.state}"
 
+    def test_max_loss_guard_beats_time_stop(self, tmp_path):
+        """Max-loss guard must fire before time-stop when both conditions are met."""
+        at, broker, _ = self._make_trader_and_broker(
+            tmp_path, start_price=100.0, volatility=0.1, drift=-20.0, seed=5)
+        cfg = TraderConfig(
+            stop_value=50.0,          # wide trailing stop — would not fire soon
+            max_loss_pct=2.0,
+            time_stop_minutes=0.001,  # also nearly expired (< 0.1 s)
+            poll_interval=0.01,
+        )
+        at.start("TEST", 1, config=cfg)
+        reached = wait_for_state(at, TraderState.SOLD, timeout=10)
+        assert reached
+        # The exit log should mention max-loss, not time-stop
+        actions = [e.action for e in at.status.log]
+        assert "SELL" in actions
+        # Should NOT have fired a TIME_STOP (max-loss takes priority)
+        assert "TIME_STOP" not in actions
+
     def test_max_loss_guard_fires(self, tmp_path):
         """max_loss_pct should trigger a sell even when price is still above the trailing stop floor."""
         # Strong downward drift so price will drop well past max_loss_pct quickly

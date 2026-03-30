@@ -8,6 +8,17 @@ All notable changes to this project will be documented here.
 
 ---
 
+## [0.35.2] — 2026-03-30
+
+### Fixed
+- Hardened the max-loss guard with three improvements:
+  1. Max-loss is now checked BEFORE the time-stop so it always takes priority when a position is deeply underwater at timer expiry
+  2. Immediate max-loss check fires right after entry completes (catches gap-downs that occur during scale/limit entry intervals before the monitor loop starts)
+  3. When max_loss_pct > 0, the monitor loop sleeps in 1 s sub-ticks and re-checks price at each sub-tick, preventing a fast-moving stock from blowing past the guard for a full poll_interval undetected
+- Added unit test `test_max_loss_guard_beats_time_stop`
+
+---
+
 ## [0.35.1] — 2026-03-30
 
 ### Added
