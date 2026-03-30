@@ -8,6 +8,12 @@ All notable changes to this project will be documented here.
 
 ---
 
+## [0.33.0] — 2026-03-30
+
+_(in development)_
+
+---
+
 ## [0.32.0] — 2026-03-30
 
 ### Changed
