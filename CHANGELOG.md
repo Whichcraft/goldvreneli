@@ -8,6 +8,26 @@ All notable changes to this project will be documented here.
 
 ---
 
+## [0.17.0] — 2026-03-30
+
+### Added
+- Settings page: Portfolio Mode defaults (`PM_TARGET_SLOTS`, `PM_SLOT_PCT`) persisted to `.env`
+
+### Fixed
+- Concurrent rescan protection in `PortfolioManager._rescan()` via `_scan_lock`: late callers wait and reuse results instead of triggering duplicate API requests
+- AutoTrader page auto-refresh now triggers for `ENTERING` state as well as `WATCHING`
+- `_fill_empty_slots()` loops `open_slot_count()` times instead of `target_slots` to respect pre-existing positions on restart
+- `MultiTrader.daily_pnl()` renamed to `unrealized_pnl()` (now includes `ENTERING` positions); deprecated alias kept for compatibility
+- Price feed falls back to last trade price when ask/bid quote returns 0 (after-hours / illiquid markets)
+- Session objects (`multitrader`, `portfolio_manager`) invalidated when Paper/Live mode changes to prevent stale client reuse
+- Installer `create_env_file()` now prompts for Alpaca Live keys interactively (default No)
+
+### Docs
+- CHANGELOG filled in for all versions v0.8.0–v0.16.0 (previously empty)
+- README: added `PM_TARGET_SLOTS` / `PM_SLOT_PCT` to `.env` reference block
+
+---
+
 ## [0.16.0] — 2026-03-30
 
 ### Added
