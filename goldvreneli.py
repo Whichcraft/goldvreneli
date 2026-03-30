@@ -26,7 +26,6 @@ st.set_page_config(page_title=f"Goldvreneli Trading v{__version__}", layout="wid
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown(f"## Goldvreneli `v{__version__}`")
-    st.divider()
 
     broker = st.radio("Broker", ["Alpaca", "IBKR"],
                       horizontal=True, label_visibility="collapsed")
@@ -34,9 +33,13 @@ with st.sidebar:
     if broker == "Alpaca":
         alpaca_is_live = st.toggle("Live Trading", key="alpaca_live")
         if alpaca_is_live:
-            st.markdown(":red[**⚠️ LIVE — real money**]")
+            st.caption(":red[**⚠️ LIVE — real money**]")
+            st.caption("Alpaca · Live account")
+        else:
+            st.caption("Alpaca · Paper account")
     else:
         alpaca_is_live = False
+        st.caption("IBKR")
 
     st.divider()
 
@@ -500,7 +503,6 @@ if broker == "Alpaca":
     _mode_label = "Live" if alpaca_is_live else "Paper"
     if alpaca_is_live:
         st.error(f"⚠️ LIVE TRADING MODE — real money at risk")
-    st.title(f"Portfolio Dashboard (Alpaca {_mode_label})")
 
     # ── Shared broker callables (used by AutoTrader, Portfolio Mode, Scanner) ─
     def alpaca_get_price(symbol: str) -> float:
@@ -1708,7 +1710,6 @@ else:
             pass
         st.rerun()
 
-    st.title(f"Portfolio Dashboard (IBKR {'Paper' if trading_mode == 'paper' else 'Live'})")
 
     with st.container(border=True):
         st.subheader("Gateway")
