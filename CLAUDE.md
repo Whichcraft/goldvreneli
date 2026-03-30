@@ -21,6 +21,10 @@ Before every commit, bump `version.py`:
 - **Minor** (0.X.0) — new features, new pages, significant behaviour changes — ask user first
 - **Major** (X.0.0) — breaking changes or full rewrites — ask user first
 
+On every version bump, also update `README.md` and `CHANGELOG.md`:
+- `README.md` — update the version badge and any feature/page descriptions affected by the changes
+- `CHANGELOG.md` — add a new `## [x.y.z] — YYYY-MM-DD` entry describing what changed
+
 ## Env vars
 `ALPACA_PAPER/LIVE_API_KEY/SECRET_KEY` · `IBKR_USERNAME/PASSWORD/MODE` · `IBC_PATH` · `GATEWAY_PATH`
 `AT_SYMBOL/THRESHOLD/POLL/DAILY_LOSS_LIMIT` · `SCAN_TOP_N/RSI_LO/RSI_HI/VOL_MULT/MIN_PRICE/MIN_ADV_M/SMA20_TOL/MIN_RET5D/WATCHLIST`
