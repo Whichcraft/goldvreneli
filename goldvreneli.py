@@ -84,6 +84,12 @@ def _get_ib():
 if page == "Settings":
     st.title("Settings")
 
+    # Show post-save messages (survive the rerun that follows saving)
+    if "_settings_key_msgs" in st.session_state:
+        st.success("Settings saved to .env")
+        for kind, msg in st.session_state.pop("_settings_key_msgs"):
+            (st.success if kind == "ok" else st.error)(msg)
+
     with st.form("settings_form"):
 
         # ── Alpaca Paper ──────────────────────────────────────────────────────
@@ -207,7 +213,22 @@ if page == "Settings":
         st.session_state.pop("ib_connect_attempted", None)
         if "gateway" in st.session_state:
             del st.session_state["gateway"]
-        st.success("Settings saved to .env")
+        # ── Validate Alpaca credentials (results survive rerun via session_state) ──
+        key_msgs = []
+        def _check_alpaca(key: str, secret: str, paper: bool, label: str):
+            if not key or not secret:
+                return
+            try:
+                from alpaca.trading.client import TradingClient
+                acct = TradingClient(api_key=key, secret_key=secret, paper=paper).get_account()
+                key_msgs.append(("ok", f"✅ {label} keys OK — account {acct.id[:8]}… ({acct.status})"))
+            except Exception as _e:
+                key_msgs.append(("err", f"❌ {label} keys invalid: {_e}"))
+
+        _check_alpaca(f_alpaca_key,      f_alpaca_secret,      paper=True,  label="Paper")
+        _check_alpaca(f_alpaca_live_key, f_alpaca_live_secret, paper=False, label="Live")
+        st.session_state["_settings_key_msgs"] = key_msgs
+
         st.rerun()
 
     st.stop()
