@@ -3,7 +3,15 @@ Streamlit trading dashboard. `streamlit run goldvreneli.py`
 Use `qmd search "query"` before reading files.
 
 ## Files
-`goldvreneli.py` UI · `core.py` env/clients · `autotrader.py` AutoTrader/MultiTrader · `portfolio.py` PortfolioManager · `scanner.py` scan/ScanFilters/UNIVERSE_US/INTL · `replay.py` backtest · `gateway_manager.py` IB Gateway/IBC · `version.py`
+`goldvreneli.py` entry point (sidebar + dispatch) · `core.py` env/clients · `autotrader.py` AutoTrader/MultiTrader · `portfolio.py` PortfolioManager · `scanner.py` scan/ScanFilters/UNIVERSE_US/INTL · `replay.py` backtest · `gateway_manager.py` IB Gateway/IBC · `ibkr_data.py` IBKRDataClient · `version.py`
+
+### Page modules (`pages/`)
+`autotrader_page.py` · `scanner_page.py` · `portfolio_page.py` · `portfolio_mode_page.py` · `backtest_page.py` · `settings_page.py` · `help_page.py`
+Each exports a single `render(...)` function. Pages must not import each other.
+
+### Tests (`tests/`)
+`test_autotrader.py` · `test_scanner.py`
+Run with `venv/bin/python -m pytest tests/ -v`
 
 ## Key API
 - `AutoTrader.start(sym,qty,cfg)` buy+monitor · `.attach(sym,qty,entry,cfg)` monitor only · `.stop()` halt
@@ -14,6 +22,9 @@ Use `qmd search "query"` before reading files.
 - Alpaca fns shared across pages: `alpaca_get_price/buy/sell/get_bars`
 - `st.session_state.scan_results` — scan results persist across reruns
 - Broker scope: IBKR = Portfolio/Settings/Help only; Alpaca = all pages
+
+## Branching
+Always develop on the `dev` branch. Never commit directly to `main`. After a release, fast-forward `dev` to `main` so all branches stay in sync.
 
 ## Versioning
 Before every commit, bump `version.py`:

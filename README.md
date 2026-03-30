@@ -257,9 +257,9 @@ Scans liquid stocks, ETFs, and ADRs using daily Alpaca bars and pandas-ta indica
 
 **Symbol list** — expand to choose specific symbols or scan the full ~600-symbol universe. Pre-populated from your watchlist in Settings.
 
-**Stale warning** — if results are more than 30 minutes old, a warning appears.
+**Auto-rescan** — if results are more than 30 minutes old, the scanner automatically re-runs with the current filter settings. A warning is shown while the rescan is in progress.
 
-**⚡ Quick Invest** — the fastest path to investing: set a dollar amount, trailing stop %, and number of top positions, then click *Invest Now*. Positions open immediately without going through the AutoTrader form. Uses your current row selection, or falls back to the top N by score if nothing is selected.
+**⚡ Quick Invest** — the fastest path to investing: set a dollar amount, trailing stop %, and number of top positions, then click *Invest Now*. A fill summary appears showing each symbol, quantity, approximate fill price, amount invested, and status. Click *Go to AutoTrader* to navigate once you've reviewed the results. Uses your current row selection, or falls back to the top N by score if nothing is selected.
 
 **Configure & Queue** — select rows, click *Configure & Queue* to send them to AutoTrader where you can review and adjust settings for each before starting.
 
@@ -270,6 +270,16 @@ All settings saved to `.env` and persist across restarts. See configuration sect
 ---
 
 ## Testing
+
+### Unit tests
+
+Business logic is fully decoupled from the UI. Run the test suite with:
+
+```bash
+venv/bin/python -m pytest tests/ -v
+```
+
+Covers `size_from_risk`, `_calc_atr`, `SyntheticPriceFeed`, `MockBroker`, `AutoTrader` full lifecycle (market/limit/scale entry, trailing stop, take-profit, breakeven, time stop, error state), and `score_symbol` with synthetic fixture DataFrames.
 
 ### 🧪 Test mode (Scanner historic data)
 
@@ -348,6 +358,9 @@ goldvreneli/
 ├── version.py                   # Single version source of truth
 ├── bump.sh                      # Version bump script
 ├── goldvreneli-install.sh       # One-command installer + updater
+├── tests/
+│   ├── test_autotrader.py       # Unit tests: size_from_risk, _calc_atr, AutoTrader lifecycle
+│   └── test_scanner.py          # Unit tests: score_symbol with fixture DataFrames
 ├── requirements.txt             # Python dependencies
 ├── .env                         # Credentials (gitignored)
 └── venv/                        # Python virtual environment (gitignored)

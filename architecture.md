@@ -51,6 +51,9 @@ goldvreneli/
 ├── gateway_manager.py           # IB Gateway subprocess lifecycle
 ├── version.py                   # __version__ string
 ├── .env                         # credentials (created on first run)
+├── tests/
+│   ├── test_autotrader.py       # size_from_risk, _calc_atr, SyntheticPriceFeed, MockBroker, AutoTrader lifecycle
+│   └── test_scanner.py          # score_symbol with fixture DataFrames
 ├── daily_loss.json              # today's cumulative realized loss (auto-managed)
 ├── live_fills.json              # live trade fill history (auto-managed)
 └── backtest_fills.json          # backtest session history (auto-managed)
@@ -79,7 +82,7 @@ Each page module in `pages/` exports a single public function `render(...)`. The
 Single source of truth for the package version string.
 
 ```python
-__version__ = "0.28.0"
+__version__ = "0.32.0"
 ```
 
 ---
@@ -788,20 +791,23 @@ Every rerun re-executes the entire script from line 1. Session state persists be
 | AutoTrader position started | AutoTrader | Show new position in table |
 | Stop all | AutoTrader | Clear active positions |
 | Individual position stopped | AutoTrader | Remove row from table |
-| **Auto-refresh (5s)** | AutoTrader | Any position in ENTERING or WATCHING state |
+| **Auto-refresh (5s, fragment)** | AutoTrader | Any position in ENTERING or WATCHING state — reruns only the positions fragment, not the form |
 | Portfolio Mode started | Portfolio Mode | Show running state |
 | Portfolio Mode stopped | Portfolio Mode | Show idle state |
 | Monitor position attached | Portfolio Mode | Show attached traders |
 | **Auto-refresh (5s)** | Portfolio Mode | While `pm_running` is True |
-| Quick Invest complete | Scanner | Cross-page navigation to AutoTrader |
+| Quick Invest complete | Scanner | Shows fill summary; user clicks "Go to AutoTrader" to navigate |
 | Symbols queued to AutoTrader | Scanner | Cross-page navigation |
+| Stale scan results (30 min) | Scanner | Auto-triggers rescan via `scan_auto_trigger` flag |
 | Backtest started | Backtest | Show live status |
 | Backtest stopped | Backtest | Show results |
 | Refresh history button | Backtest | Reload `backtest_fills.json` |
 
 ### Auto-refresh loop invariant
 
-Auto-refresh calls `st.rerun()` unconditionally after a `time.sleep(5)` when any position is active. **Never place side-effectful code** (orders, writes) between the activity check and `st.rerun()` — it will execute on every poll cycle.
+AutoTrader's live view is wrapped in `@st.fragment`. The `time.sleep(5); st.rerun()` inside the fragment only reruns the fragment — the form above is unaffected. **Never place side-effectful code** (orders, writes) between the activity check and `st.rerun()` — it will execute on every poll cycle.
+
+Portfolio Mode page still uses a whole-page `time.sleep(5); st.rerun()` because it has no user-input form above the live view.
 
 ### Session state keys by category
 
@@ -815,6 +821,8 @@ Auto-refresh calls `st.rerun()` unconditionally after a `time.sleep(5)` when any
 | **AT queue** | `at_current_symbol`, `at_queue`, `at_prefill`, `at_prefill_list` | Cross-page handoff from Scanner |
 | **Trader objects** | `multitrader`, `portfolio_manager`, `bt_at` | Cleared on broker/mode change |
 | **Scan cache** | `scan_results`, `scan_ts` | Written by Scanner; read by Portfolio Mode |
+| **Scan auto-trigger** | `scan_auto_trigger` | One-shot flag; set when results go stale; consumed at scan trigger point |
+| **Quick Invest** | `qi_summary` | Fill summary list shown after Invest Now; cleared on next invest or navigation |
 
 ---
 
