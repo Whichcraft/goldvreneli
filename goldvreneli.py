@@ -373,6 +373,25 @@ if broker == "Alpaca":
     from alpaca.data.timeframe import TimeFrame
     from datetime import datetime, timedelta, time as dtime
 
+    # ── Live mode confirmation guard ──────────────────────────────────────────
+    if not alpaca_is_live:
+        st.session_state.pop("live_confirmed", None)
+
+    if alpaca_is_live and not st.session_state.get("live_confirmed"):
+        st.warning(
+            "⚠️ **You're going to trade with your real money now!**\n\n"
+            "Live orders will be placed on your real Alpaca account. "
+            "This is not a simulation."
+        )
+        c1, c2 = st.columns([1, 1])
+        if c1.button("I understand — switch to Live", type="primary"):
+            st.session_state["live_confirmed"] = True
+            st.rerun()
+        if c2.button("Cancel — stay on Paper"):
+            st.session_state["alpaca_live"] = False
+            st.rerun()
+        st.stop()
+
     if alpaca_is_live:
         api_key    = env_get("ALPACA_LIVE_API_KEY")
         secret_key = env_get("ALPACA_LIVE_SECRET_KEY")
