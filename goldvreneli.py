@@ -29,6 +29,7 @@ import pages.autotrader_page as autotrader_page
 import pages.portfolio_mode_page as portfolio_mode_page
 import pages.scanner_page as scanner_page
 import pages.backtest_page as backtest_page
+import pages.test_mode_page as test_mode_page
 from ibkr_data import IBKRDataClient
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -66,34 +67,55 @@ with st.sidebar:
 
     # Allow programmatic navigation (e.g. Scanner → AutoTrader handoff)
     if "nav_page" in st.session_state:
-        st.session_state["nav_radio"] = st.session_state.pop("nav_page")
+        _target = st.session_state.pop("nav_page")
+        if _target in ("Backtest", "Test Mode"):
+            st.session_state["nav_test"]  = _target
+            st.session_state.pop("nav_radio", None)
+        else:
+            st.session_state["nav_radio"] = _target
+            st.session_state.pop("nav_test", None)
 
-    if broker == "Alpaca":
-        pages = ["Scanner", "Portfolio Mode", "AutoTrader", "Portfolio", "Backtest", "Settings", "Help"]
-        icons = ["🔍", "📈", "🤖", "💼", "🧪", "⚙️", "❓"]
-    else:
-        pages = ["Scanner", "Portfolio Mode", "AutoTrader", "Portfolio", "Backtest", "Settings", "Help"]
-        icons = ["🔍", "📈", "🤖", "💼", "🧪", "⚙️", "❓"]
-
+    # ── Main nav ──────────────────────────────────────────────────────────
+    _main_pages = ["Scanner", "Portfolio Mode", "AutoTrader", "Portfolio", "Settings", "Help"]
+    _main_icons = ["🔍", "📈", "🤖", "💼", "⚙️", "❓"]
     page = st.radio(
         "Page",
-        pages,
-        format_func=lambda p: f"{icons[pages.index(p)]}  {p}",
+        _main_pages,
+        format_func=lambda p: f"{_main_icons[_main_pages.index(p)]}  {p}",
         label_visibility="collapsed",
         key="nav_radio",
     )
+    # Selecting main nav clears the test nav
+    if page and st.session_state.get("nav_test"):
+        st.session_state.pop("nav_test", None)
+
+    # ── Testing nav ───────────────────────────────────────────────────────
+    st.caption("**Testing**")
+    _test_pages = ["Backtest", "Test Mode"]
+    _test_icons = ["🧪", "🎮"]
+    test_page = st.radio(
+        "Testing",
+        _test_pages,
+        format_func=lambda p: f"{_test_icons[_test_pages.index(p)]}  {p}",
+        label_visibility="collapsed",
+        index=None,
+        key="nav_test",
+    )
+    # Selecting test nav clears the main nav highlight by overriding active page
+    if test_page:
+        page = test_page
 
     st.divider()
 
     # ── Workflow hint ──────────────────────────────────────────────────────
-    if broker == "Alpaca":
+    if broker == "Alpaca" and not test_page:
         st.caption("**Suggested workflow**")
         st.caption("1. 🔍 **Scanner** — find best stocks")
         st.caption("2. ⚡ **Quick Invest** — one click to open positions")
         st.caption("3. 📈 **Portfolio Mode** — fully automated, hands-off")
 
     st.divider()
-    use_hist = st.toggle("🧪 Test mode (historic data)", key="use_hist")
+    use_hist = st.toggle("🧪 Historic data mode", key="use_hist")
     if use_hist:
         as_of_date = st.date_input("As-of date", value=_dt_now.now().date(), key="as_of_date")
         st.caption("Scanner uses closing data up to this date.")
@@ -264,6 +286,8 @@ if broker == "Alpaca":
         scanner_page.render(data_client, get_price_fn, buy_fn, sell_fn, mt, use_hist, as_of_date, broker)
     elif page == "Backtest":
         backtest_page.render(data_client, broker)
+    elif page == "Test Mode":
+        test_mode_page.render(data_client, get_price_fn, get_bars_fn)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # IBKR DASHBOARD
@@ -461,3 +485,5 @@ else:
         scanner_page.render(data_client, get_price_fn, buy_fn, sell_fn, mt, use_hist, as_of_date, broker)
     elif page == "Backtest":
         backtest_page.render(data_client, broker)
+    elif page == "Test Mode":
+        test_mode_page.render(data_client, get_price_fn, get_bars_fn)

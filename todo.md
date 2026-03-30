@@ -89,7 +89,7 @@ Add a scan history view that shows previous scan runs (timestamp, filter setting
 ### ~~19. Move Activity Log to a dedicated `activity_tracker` module~~ ✓ fixed in 0.34.2
 Extract the activity-log logic (state, append, render) from page files into a new `activity_tracker.py` module to keep pages thin and the tracker reusable.
 
-### 20. Group Backtest + Test Mode under a "Testing" section in the sidebar
+### ~~20. Group Backtest + Test Mode under a "Testing" section in the sidebar~~ ✓ fixed in 0.35.0
 Move the Backtest page and Paper Trading / Test Mode into a dedicated "Testing" collapsible group in the left sidebar nav, separate from the live-trading pages. Test Mode should let users run AutoTrader logic against live prices without placing real orders (dry-run / paper mode).
 
 ### ~~21. Activity Log: persistent left-sidebar panel~~ ✓ fixed in 0.34.2

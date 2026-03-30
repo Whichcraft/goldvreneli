@@ -8,6 +8,13 @@ All notable changes to this project will be documented here.
 
 ---
 
+## [0.35.0] — 2026-03-30
+
+### Added
+- New "Testing" section in sidebar nav separates live-trading pages from Backtest and new Test Mode page. Test Mode runs AutoTrader logic against live prices without placing real broker orders (simulated buy/sell) (#20)
+
+---
+
 ## [0.34.2] — 2026-03-30
 
 ### Added
