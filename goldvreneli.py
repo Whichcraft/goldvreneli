@@ -45,8 +45,8 @@ with st.sidebar:
         st.session_state["nav_radio"] = st.session_state.pop("nav_page")
 
     if broker == "Alpaca":
-        pages = ["Portfolio", "AutoTrader", "Portfolio Mode", "Scanner", "Backtest", "Settings", "Help"]
-        icons = ["💼", "🤖", "📈", "🔍", "🧪", "⚙️", "❓"]
+        pages = ["Scanner", "Portfolio Mode", "AutoTrader", "Portfolio", "Backtest", "Settings", "Help"]
+        icons = ["🔍", "📈", "🤖", "💼", "🧪", "⚙️", "❓"]
     else:
         pages = ["Portfolio", "Settings", "Help"]
         icons = ["💼", "⚙️", "❓"]
@@ -58,6 +58,15 @@ with st.sidebar:
         label_visibility="collapsed",
         key="nav_radio",
     )
+
+    st.divider()
+
+    # ── Workflow hint ──────────────────────────────────────────────────────
+    if broker == "Alpaca":
+        st.caption("**Suggested workflow**")
+        st.caption("1. 🔍 **Scanner** — find best stocks")
+        st.caption("2. ⚡ **Quick Invest** — one click to open positions")
+        st.caption("3. 📈 **Portfolio Mode** — fully automated, hands-off")
 
     st.divider()
     st.caption("Alpaca Paper/Live · IBKR · MIT License")
@@ -211,11 +220,29 @@ if page == "Help":
 
     with st.expander("Quick Start", expanded=True):
         st.markdown("""
-1. Go to **⚙️ Settings** and enter your Alpaca paper API keys (free at [alpaca.markets](https://alpaca.markets)).
-2. Select **Alpaca (Paper)** in the sidebar.
-3. Use **💼 Portfolio** to view positions and place manual orders.
-4. Use **🔍 Scanner** to find candidates, then send them to **🤖 AutoTrader**.
-5. Use **🧪 Backtest** to test AutoTrader logic on historical data without risking money.
+### Setup (one time)
+1. Go to **⚙️ Settings** → enter your Alpaca paper API keys (free at [alpaca.markets](https://alpaca.markets))
+2. Select **Alpaca (Paper)** in the sidebar
+
+### Recommended workflow
+**Option A — Fully automated (recommended)**
+1. Go to **📈 Portfolio Mode**
+2. Set *target slots* (e.g. 5) and *$ per slot* (e.g. $3,000)
+3. Click **▶ Start All** — it scans, picks the best stocks, invests, and reinvests automatically
+
+**Option B — Manual with scanner guidance**
+1. Go to **🔍 Scanner** → click **Run Scan**
+2. Review the ranked results
+3. Click **⚡ Invest Now** — set dollar amount and stop %, done
+4. Watch live in **🤖 AutoTrader**
+
+**Option C — Full manual**
+- Use **💼 Portfolio** to view account, place orders, see open positions
+- Use **🤖 AutoTrader** to enter a symbol manually with trailing stop
+
+### Other pages
+- **🧪 Backtest** — replay real historical data to test stop settings before going live
+- **⚙️ Settings** — API keys, scanner filter defaults, AutoTrader defaults
 """)
 
     with st.expander("💼 Portfolio"):
@@ -531,7 +558,10 @@ if broker == "Alpaca":
             fig.update_layout(title="Unrealized P&L by Position", yaxis_title="P&L ($)", height=350)
             st.plotly_chart(fig, width="stretch")
         else:
-            st.info("No open positions.")
+            st.info(
+                "No open positions. "
+                "Go to **🔍 Scanner** to find the best stocks and invest with one click."
+            )
 
         st.divider()
 
@@ -757,6 +787,24 @@ if broker == "Alpaca":
 
         # ── Positions table ───────────────────────────────────────────────
         statuses = mt.statuses()
+        if not statuses:
+            scan_done = st.session_state.get("scan_ts") is not None
+            scan_has_results = not st.session_state.get("scan_results", pd.DataFrame()).empty
+            if not scan_done:
+                st.info(
+                    "💡 **No positions yet.** "
+                    "Go to **🔍 Scanner** first to find the best stocks, "
+                    "then use **⚡ Quick Invest** to open positions in one click — "
+                    "or configure a symbol manually in the form above."
+                )
+            elif scan_has_results:
+                st.info(
+                    "💡 **Scanner results are ready.** "
+                    "Go to **🔍 Scanner → ⚡ Quick Invest** to open positions, "
+                    "or fill in the symbol form above."
+                )
+            else:
+                st.info("💡 Configure a symbol above and click **Start** to open a position.")
         if statuses:
             state_color = {
                 "idle":     "gray",
@@ -849,6 +897,14 @@ if broker == "Alpaca":
 
         pm_exists = "portfolio_manager" in st.session_state
         pm_running = pm_exists and st.session_state["portfolio_manager"].running
+
+        if not pm_running:
+            st.info(
+                "📈 **Fully automated investing in 3 steps:**  \n"
+                "1. Set **target slots** (e.g. 5) and **$ per slot** (e.g. $3,000)  \n"
+                "2. Click **▶ Start All** — scans for the best stocks and opens all positions at once  \n"
+                "3. Walk away — positions are managed automatically; each one that closes is replaced with the next best pick"
+            )
 
         # ── Configuration ─────────────────────────────────────────────────
         with st.expander("Configuration", expanded=not pm_running):
@@ -1006,8 +1062,12 @@ if broker == "Alpaca":
 
     # ── Page: Scanner ────────────────────────────────────────────────────────
     elif page == "Scanner":
-        st.subheader("Position Scanner")
-        st.caption("Scans ~600 liquid US stocks, ETFs, and ADRs, applies technical filters, proposes the top candidates.")
+        st.subheader("🔍 Position Scanner — Start Here")
+        st.caption(
+            "Scans ~600 liquid US stocks, ETFs, and ADRs using technical filters and ranks them by performance. "
+            "**Run a scan → use ⚡ Quick Invest to open positions in one click, "
+            "or send to 📈 Portfolio Mode for fully automated hands-off investing.**"
+        )
 
         col_a, col_b, col_c = st.columns([1, 2, 2])
         top_n      = col_a.number_input("Top N results", min_value=1, max_value=50,
