@@ -8,6 +8,72 @@ All notable changes to this project will be documented here.
 
 ---
 
+## [0.23.6] — 2026-03-30
+
+### Added
+- **Sidebar: 🧪 Test mode (historic data)** toggle — enables as-of-date scanning from the sidebar; date picker appears inline when on; caption explains the behaviour
+
+### Changed
+- Scanner: "Top N results" input renamed to "How many top candidates to return"
+- Scanner: "Historical date" checkbox and "As-of date" picker removed from the scanner page; replaced by the sidebar Test mode toggle
+
+---
+
+## [0.23.5] — 2026-03-30
+
+### Changed
+- Removed `st.title("Portfolio Dashboard …")` heading from both the Alpaca and IBKR portfolio pages
+- Sidebar: active account/mode (e.g. "Alpaca · Paper account") shown directly below the version heading; live warning moved to a caption
+
+---
+
+## [0.23.4] — 2026-03-30
+
+### Fixed
+- `StreamlitValueBelowMinError` crash on Portfolio and Scanner pages when `PM_SLOT_DOLLAR=0` was written to `.env` by the "% of equity" sizing mode; both `$ per slot` and `$ per position` inputs now clamp the loaded value to ≥ 100
+
+---
+
+## [0.23.3] — 2026-03-30
+
+### Added
+- **Scanner: INTL (full) universe** (~125 symbols) — superset of INTL (small) with additional European, Asian, Canadian, and Australian ADRs plus extended country ETFs
+- Scanner market selector now has four options: 🇺🇸 US (~593), 🌍 INTL (small) (~62), 🌍 INTL (full) (~125), 🌐 All (~718)
+- `UNIVERSE_INTL_FULL` exported from `scanner.py`; `UNIVERSE` (All) updated to `UNIVERSE_US + UNIVERSE_INTL_FULL`
+
+### Fixed
+- Scanner expander / checkbox labels now reflect the selected market choice (was always showing "full universe")
+
+---
+
+## [0.23.2] — 2026-03-30
+
+### Fixed
+- Settings API key validation: `acct.id` from Alpaca SDK is a `UUID` object — cast to `str` before slicing to fix `'UUID' object is not subscriptable`
+
+---
+
+## [0.23.1] — 2026-03-30
+
+### Added
+- Settings page: Alpaca API keys validated immediately on save; ✅/❌ feedback messages persist across `st.rerun()` via `session_state`
+- Installer `--update`: fast path deploys from local dev tree when the local version is newer than the installed version, avoiding a stale GitHub clone
+- CLAUDE.md: versioning rules documented (patch/minor/major thresholds and prompts)
+
+---
+
+## [0.23.0] — 2026-03-30
+
+### Added
+- `AutoTrader.attach(symbol, qty, entry_price, config)` — monitor an existing position without placing a buy order; useful after app restart
+- `MultiTrader.attach(...)` — same in the multi-position context; wires `_on_close` for daily loss tracking
+
+### Fixed
+- `PortfolioManager`: on slot-sizing error, `_claimed.discard(sym)` now called so the symbol is not permanently blocked
+- `AutoTrader._do_market_entry`: `self.status.qty` now set from `total_filled`
+
+---
+
 ## [0.22.0] — 2026-03-30
 
 ### Added

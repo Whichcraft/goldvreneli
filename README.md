@@ -1,6 +1,6 @@
 # Goldvreneli Trading Dashboard
 
-![Version](https://img.shields.io/badge/version-0.22.0-blue)
+![Version](https://img.shields.io/badge/version-0.24.0-blue)
 
 A Streamlit-based trading dashboard supporting **Alpaca Paper and Live Trading** and **Interactive Brokers (IBKR)** via IB Gateway, with automated trailing-stop trading, technical scanning, portfolio automation, and offline backtesting.
 
@@ -12,7 +12,7 @@ A Streamlit-based trading dashboard supporting **Alpaca Paper and Live Trading**
 - **IBKR live/paper trading** — IB Gateway managed directly from the app (no Docker)
 - **AutoTrader** — trailing-stop position manager: holds as long as price rises, sells when it drops below a configurable threshold; supports PCT and ATR stops, limit/scale entry, take-profit, breakeven, time stop, and multi-symbol queuing
 - **Portfolio Mode** — fully automated: maintains up to N concurrent positions from scanner picks, each sized at a fixed % of equity; on exit, rescans and opens the next best candidate
-- **Position Scanner** — scans ~600 liquid US stocks, ETFs, and ADRs with technical filters (RSI, SMA, volume, relative strength vs SPY) and proposes top candidates; historical mode supported
+- **Position Scanner** — scans liquid stocks, ETFs, and ADRs across four selectable universes (US ~593, INTL small ~62, INTL full ~125, All ~718) with technical filters (RSI, SMA, volume, relative strength vs SPY); **🧪 Test mode** in the sidebar replays as of any past date
 - **Backtest** — replay real Alpaca 1-minute bars or synthetic random-walk data to test AutoTrader settings offline
 - IB Gateway auto-start via IBC + Xvfb (headless, no manual login on startup)
 - Risk-% and dollar-amount position sizing
@@ -122,14 +122,18 @@ Open [http://localhost:8501](http://localhost:8501) in your browser.
 
 ## Alpaca Paper vs Live
 
-The sidebar shows an **Alpaca** broker selector with a **Live Trading** toggle.
+The sidebar shows an **Alpaca** broker selector with a **Live Trading** toggle. Below the version heading the active account (Paper/Live) is shown at all times.
 
 | Mode | Keys used | Orders |
 |------|-----------|--------|
 | Paper (default) | `ALPACA_PAPER_*` | Simulated — no real money |
 | Live | `ALPACA_LIVE_*` | **Real orders on your funded account** |
 
-Switching to Live requires a confirmation step ("You're going to trade with your real money now!") and displays a persistent red warning banner. If live API keys are not yet configured, an inline credential form appears before proceeding.
+Switching to Live requires a confirmation step and displays a persistent red warning banner. If live API keys are not yet configured, an inline credential form appears before proceeding.
+
+### 🧪 Test mode
+
+Enable **Test mode (historic data)** in the sidebar to run the Scanner as of any past date. An "As-of date" picker appears; all scanner fetches use closing data up to that date. Portfolio and trading pages are unaffected.
 
 ---
 
@@ -228,9 +232,10 @@ Scans liquid stocks, ETFs, and ADRs using daily Alpaca bars and pandas-ta indica
 
 | Selection | Universe |
 |-----------|----------|
-| 🇺🇸 US | ~500 US-incorporated equities and US-focused ETFs |
-| 🌍 International | Foreign ADRs (Europe, Asia, LatAm, Canada) + country/regional ETFs |
-| 🌐 All | Full combined universe (~600+ symbols) |
+| 🇺🇸 US | ~593 US-incorporated equities and US-focused ETFs |
+| 🌍 INTL (small) | ~62 flagship foreign ADRs + broad country/regional ETFs |
+| 🌍 INTL (full) | ~125 comprehensive international ADRs (superset of small) |
+| 🌐 All | Full combined universe (~718 symbols) |
 
 **Hard filters** (all must pass)
 
@@ -252,7 +257,7 @@ Scans liquid stocks, ETFs, and ADRs using daily Alpaca bars and pandas-ta indica
 
 **Live filter controls** — the **Filters** expander lets you adjust all hard-filter thresholds (min price, ADV, RSI range, volume multiplier, SMA20 tolerance, min 5d return) directly on the page without going to Settings. Click *Save as defaults* to persist the current values.
 
-**Historical mode** — tick "Historical date" to scan as of a past date using data up to that close.
+**Test mode** — enable **🧪 Test mode (historic data)** in the sidebar to scan as of a past date using data up to that close. The "As-of date" picker appears in the sidebar when enabled.
 
 **Symbol list** — expand to choose specific symbols or scan the full ~600-symbol universe. Pre-populated from your watchlist in Settings.
 
