@@ -1,0 +1,13 @@
+collections:
+  source:
+    path: .
+    pattern: "*.py"
+  pages:
+    path: ./pages
+    pattern: "*.py"
+  tests:
+    path: ./tests
+    pattern: "*.py"
+  docs:
+    path: .
+    pattern: "*.md"

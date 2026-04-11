@@ -1,6 +1,6 @@
 # Goldvreneli
 Streamlit trading dashboard. `streamlit run goldvreneli.py`
-Use `qmd search "query"` before reading files.
+Use `qmd search "query"` before reading files. After any file changes run `qmd update && qmd embed`.
 
 ## Files
 `goldvreneli.py` entry point (sidebar + dispatch) · `core.py` env/clients · `autotrader.py` AutoTrader/MultiTrader · `portfolio.py` PortfolioManager · `scanner.py` scan/ScanFilters/UNIVERSE_US/INTL · `replay.py` replay feeds (used by Test Mode) · `activity_tracker.py` log renderer · `gateway_manager.py` IB Gateway/IBC · `ibkr_data.py` IBKRDataClient · `version.py`
