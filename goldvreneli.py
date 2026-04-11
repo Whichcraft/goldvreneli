@@ -1,19 +1,47 @@
+import logging
 import os
+import threading
 import time
 from datetime import datetime as _dt_now
+from pathlib import Path
 import streamlit as st
 import plotly.graph_objects as go
 import pandas as pd
+from cachetools import TTLCache
 
 from version import __version__
 from core import (
     INSTALL_DIR, ENV_FILE, LIVE_FILLS_FILE,
+    BrokerContext, Settings, ValidationError,
     env_get, env_save,
     get_alpaca_clients, clear_alpaca_cache,
     get_gateway, get_ib,
     get_multi_trader,
     get_portfolio_manager,
 )
+from stream import AlpacaStreamManager
+
+# ── File logging (activates existing logger calls across all modules) ─────────
+_log_dir = Path.home() / ".goldvreneli"
+_log_dir.mkdir(exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    handlers=[logging.FileHandler(_log_dir / "goldvreneli.log")],
+)
+# ── Validate config at startup — catch bad env vars before any trading ─────────
+try:
+    _settings = Settings.from_env()
+except ValidationError as _cfg_err:
+    # Don't stop the app — fall back to defaults and warn the user
+    _settings = Settings()
+    import streamlit as _st_err
+    _st_err.warning(
+        f"⚠️ **Configuration error** — one or more env vars are invalid. "
+        f"Defaults are in use until fixed in **Settings**.\n\n"
+        f"```\n{_cfg_err}\n```"
+    )
+
 from autotrader import (
     AutoTrader, MultiTrader, TraderConfig, TraderState,
     StopMode, EntryMode, size_from_risk,
@@ -255,33 +283,81 @@ if broker == "Alpaca":
     if "autotrader" in st.session_state and "multitrader" not in st.session_state:
         del st.session_state["autotrader"]
 
-    mt = get_multi_trader(st.session_state, alpaca_get_price, alpaca_buy, alpaca_sell, alpaca_get_bars)
-    # Abstract broker callables (shared pages use these)
-    get_price_fn  = alpaca_get_price
-    buy_fn        = alpaca_buy
-    sell_fn       = alpaca_sell
-    get_bars_fn   = alpaca_get_bars
-    get_equity_fn = lambda: float(trading_client.get_account().equity)
-    # Clear mt/pm if user last used a different broker
+    # ── TTL caches — persist across Streamlit reruns via session_state ────────
+    if "_gv_bars_cache" not in st.session_state:
+        st.session_state["_gv_bars_cache"]   = TTLCache(maxsize=512, ttl=60)
+        st.session_state["_gv_bars_lock"]    = threading.Lock()
+        st.session_state["_gv_equity_cache"] = TTLCache(maxsize=1,   ttl=30)
+        st.session_state["_gv_equity_lock"]  = threading.Lock()
+
+    _bars_cache   = st.session_state["_gv_bars_cache"]
+    _bars_lock    = st.session_state["_gv_bars_lock"]
+    _equity_cache = st.session_state["_gv_equity_cache"]
+    _equity_lock  = st.session_state["_gv_equity_lock"]
+
+    def _get_bars_cached(symbol: str) -> pd.DataFrame:
+        with _bars_lock:
+            if symbol in _bars_cache:
+                return _bars_cache[symbol]
+            result = alpaca_get_bars(symbol)
+            _bars_cache[symbol] = result
+            return result
+
+    def _get_equity_cached() -> float:
+        with _equity_lock:
+            if "_" in _equity_cache:
+                return _equity_cache["_"]
+            result = float(trading_client.get_account().equity)
+            _equity_cache["_"] = result
+            return result
+
+    # ── WebSocket stream — subscribe lazily, fall back to REST on cache miss ──
+    _stream_key = f"alpaca_stream_{api_key[:8]}"
+    if _stream_key not in st.session_state or not st.session_state[_stream_key].is_alive:
+        if _stream_key in st.session_state:
+            st.session_state[_stream_key].stop()
+        st.session_state[_stream_key] = AlpacaStreamManager(api_key, secret_key)
+    _stream_mgr = st.session_state[_stream_key]
+
+    def _get_price_streaming(symbol: str) -> float:
+        cached = _stream_mgr.get_price(symbol)
+        if cached is not None:
+            return cached
+        return alpaca_get_price(symbol)
+
+    mt = get_multi_trader(st.session_state, _get_price_streaming, alpaca_buy, alpaca_sell, _get_bars_cached)
+    ctx = BrokerContext(
+        name="Alpaca",
+        get_price=_get_price_streaming,
+        buy=alpaca_buy,
+        sell=alpaca_sell,
+        get_bars=_get_bars_cached,
+        get_equity=_get_equity_cached,
+        data_client=data_client,
+    )
+    # Clear mt/pm (and stream) if user last used a different broker
     if st.session_state.get("_broker_last") != "Alpaca":
         st.session_state.pop("multitrader", None)
         st.session_state.pop("portfolio_manager", None)
+        if _stream_key in st.session_state:
+            st.session_state[_stream_key].stop()
+            st.session_state.pop(_stream_key, None)
+        st.session_state.pop("_gv_bars_cache", None)
+        st.session_state.pop("_gv_equity_cache", None)
         st.session_state["_broker_last"] = "Alpaca"
 
     # ── Page dispatch (Alpaca) ─────────────────────────────────────────────────
     if page == "Portfolio":
         portfolio_page.render(broker, trading_client, data_client, account, _get_ib(), None,
-                              alpaca_is_live, ibkr_is_live, get_bars_fn)
+                              alpaca_is_live, ibkr_is_live, ctx.get_bars)
     elif page == "AutoTrader":
-        autotrader_page.render(mt, get_price_fn, buy_fn, sell_fn, get_bars_fn, get_equity_fn,
-                               broker, trading_client, None)
+        autotrader_page.render(mt, ctx, trading_client, None)
     elif page == "Portfolio Mode":
-        portfolio_mode_page.render(mt, data_client, get_price_fn, buy_fn, sell_fn, get_bars_fn,
-                                   get_equity_fn, broker, trading_client, None)
+        portfolio_mode_page.render(mt, ctx, trading_client, None)
     elif page == "Scanner":
-        scanner_page.render(data_client, get_price_fn, buy_fn, sell_fn, mt, use_hist, as_of_date, broker)
+        scanner_page.render(ctx, mt, use_hist, as_of_date)
     elif page == "Test Mode":
-        test_mode_page.render(data_client, get_price_fn, get_bars_fn)
+        test_mode_page.render(ctx)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # IBKR DASHBOARD
@@ -324,7 +400,7 @@ else:
     ib = _get_ib()
     api_port = 4001 if ibkr_is_live else 4002
 
-    # Clear mt/pm/gateway if broker or IBKR mode changed
+    # Clear mt/pm/gateway/caches if broker or IBKR mode changed
     _ibkr_last_key = f"IBKR:{trading_mode}"
     if st.session_state.get("_broker_last") != _ibkr_last_key:
         st.session_state.pop("multitrader", None)
@@ -332,6 +408,8 @@ else:
         st.session_state.pop("gateway", None)
         st.session_state.pop("gw_start_attempted", None)
         st.session_state.pop("ib_connect_attempted", None)
+        st.session_state.pop("_gv_bars_cache", None)
+        st.session_state.pop("_gv_equity_cache", None)
         st.session_state["_broker_last"] = _ibkr_last_key
 
     # ── Detect crashes and dropped connections; reset flags to allow retry ────
@@ -409,13 +487,45 @@ else:
         tags = {v.tag: v.value for v in summary if v.currency in ("USD", "")}
         return float(tags.get("NetLiquidation", 0))
 
-    data_client   = IBKRDataClient(ib)
-    get_price_fn  = ibkr_get_price
-    buy_fn        = ibkr_buy
-    sell_fn       = ibkr_sell
-    get_bars_fn   = ibkr_get_bars
-    get_equity_fn = ibkr_get_equity
-    mt = get_multi_trader(st.session_state, ibkr_get_price, ibkr_buy, ibkr_sell, ibkr_get_bars)
+    # ── TTL caches (IBKR bars are slow; equity query hits accountSummary) ─────
+    if "_gv_bars_cache" not in st.session_state:
+        st.session_state["_gv_bars_cache"]   = TTLCache(maxsize=512, ttl=60)
+        st.session_state["_gv_bars_lock"]    = threading.Lock()
+        st.session_state["_gv_equity_cache"] = TTLCache(maxsize=1,   ttl=30)
+        st.session_state["_gv_equity_lock"]  = threading.Lock()
+
+    _bars_cache   = st.session_state["_gv_bars_cache"]
+    _bars_lock    = st.session_state["_gv_bars_lock"]
+    _equity_cache = st.session_state["_gv_equity_cache"]
+    _equity_lock  = st.session_state["_gv_equity_lock"]
+
+    def _get_bars_cached(symbol: str) -> pd.DataFrame:
+        with _bars_lock:
+            if symbol in _bars_cache:
+                return _bars_cache[symbol]
+            result = ibkr_get_bars(symbol)
+            _bars_cache[symbol] = result
+            return result
+
+    def _get_equity_cached() -> float:
+        with _equity_lock:
+            if "_" in _equity_cache:
+                return _equity_cache["_"]
+            result = ibkr_get_equity()
+            _equity_cache["_"] = result
+            return result
+
+    data_client = IBKRDataClient(ib)
+    mt = get_multi_trader(st.session_state, ibkr_get_price, ibkr_buy, ibkr_sell, _get_bars_cached)
+    ctx = BrokerContext(
+        name="IBKR",
+        get_price=ibkr_get_price,
+        buy=ibkr_buy,
+        sell=ibkr_sell,
+        get_bars=_get_bars_cached,
+        get_equity=_get_equity_cached,
+        data_client=data_client,
+    )
 
     # ── Gateway status panel (shown on all IBKR pages except Settings/Help) ──
     if page not in ("Settings", "Help"):
@@ -468,14 +578,12 @@ else:
     # ── Page dispatch (IBKR) ──────────────────────────────────────────────────
     if page == "Portfolio":
         portfolio_page.render(broker, None, data_client, None, ib, gw,
-                              alpaca_is_live, ibkr_is_live, get_bars_fn)
+                              alpaca_is_live, ibkr_is_live, ctx.get_bars)
     elif page == "AutoTrader":
-        autotrader_page.render(mt, get_price_fn, buy_fn, sell_fn, get_bars_fn, get_equity_fn,
-                               broker, None, ib)
+        autotrader_page.render(mt, ctx, None, ib)
     elif page == "Portfolio Mode":
-        portfolio_mode_page.render(mt, data_client, get_price_fn, buy_fn, sell_fn, get_bars_fn,
-                                   get_equity_fn, broker, None, ib)
+        portfolio_mode_page.render(mt, ctx, None, ib)
     elif page == "Scanner":
-        scanner_page.render(data_client, get_price_fn, buy_fn, sell_fn, mt, use_hist, as_of_date, broker)
+        scanner_page.render(ctx, mt, use_hist, as_of_date)
     elif page == "Test Mode":
-        test_mode_page.render(data_client, get_price_fn, get_bars_fn)
+        test_mode_page.render(ctx)

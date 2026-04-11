@@ -30,7 +30,12 @@ def render_log(mt: MultiTrader, max_rows: int | None = None) -> None:
         }
         for e in entries
     ]
-    st.dataframe(pd.DataFrame(log_data), width="stretch", hide_index=True)
+    df = pd.DataFrame(log_data)
+    st.dataframe(df, width="stretch", hide_index=True)
+    st.download_button(
+        "⬇ Export CSV", df.to_csv(index=False),
+        "activity_log.csv", "text/csv", key="at_log_export_csv",
+    )
 
 
 def render_sidebar_log(mt: MultiTrader, max_rows: int = 8) -> None:

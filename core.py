@@ -40,11 +40,13 @@ import json
 import os
 import threading
 import uuid
+from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, MutableMapping, Optional, Tuple
 
 from dotenv import dotenv_values, load_dotenv, set_key
+from pydantic import BaseModel, ValidationError, field_validator
 
 load_dotenv()
 
@@ -52,6 +54,109 @@ INSTALL_DIR: str       = os.path.dirname(os.path.abspath(__file__))
 ENV_FILE: str          = os.path.join(INSTALL_DIR, ".env")
 _DAILY_LOSS_FILE: str  = os.path.join(INSTALL_DIR, "daily_loss.json")
 LIVE_FILLS_FILE: str   = os.path.join(INSTALL_DIR, "live_fills.json")
+
+
+@dataclass
+class BrokerContext:
+    """Broker-agnostic callable bundle passed to page render functions."""
+    name: str                            # "Alpaca" | "IBKR" | "Test Mode"
+    get_price: Callable[[str], float]
+    buy: Callable[[str, int], None]
+    sell: Callable[[str, int], None]
+    get_bars: Callable[[str], Any]
+    get_equity: Callable[[], float]
+    data_client: Any
+
+
+class Settings(BaseModel):
+    """Validated trading configuration loaded from environment variables.
+
+    Call ``Settings.from_env()`` to load and validate all settings at startup.
+    A ``ValidationError`` is raised immediately if any value is out of range,
+    rather than failing mid-trade with a cryptic cast error.
+    """
+    model_config = {"str_strip_whitespace": True}
+
+    # ── AutoTrader ─────────────────────────────────────────────────────────────
+    at_symbol:            str   = ""
+    at_threshold:         float = 0.5
+    at_poll:              int   = 5
+    at_daily_loss_limit:  float = 0.0
+
+    # ── Scanner ────────────────────────────────────────────────────────────────
+    scan_top_n:     int   = 10
+    scan_rsi_lo:    float = 35.0
+    scan_rsi_hi:    float = 72.0
+    scan_vol_mult:  float = 1.0
+    scan_min_price: float = 5.0
+    scan_min_adv_m: float = 5.0
+    scan_sma20_tol: float = 3.0
+    scan_min_ret5d: float = -1.0
+    scan_watchlist: str   = ""
+
+    # ── Portfolio Mode ─────────────────────────────────────────────────────────
+    pm_target_slots: int   = 10
+    pm_slot_pct:     float = 10.0
+    pm_slot_dollar:  float = 3000.0
+
+    @field_validator("at_poll", "scan_top_n", "pm_target_slots", mode="before")
+    @classmethod
+    def _positive_int(cls, v: Any) -> int:
+        v = int(float(v))
+        if v < 1:
+            raise ValueError("must be ≥ 1")
+        return v
+
+    @field_validator(
+        "at_threshold", "at_daily_loss_limit", "scan_vol_mult",
+        "scan_min_price", "scan_min_adv_m", "scan_sma20_tol",
+        "pm_slot_pct", "pm_slot_dollar",
+        mode="before",
+    )
+    @classmethod
+    def _non_negative_float(cls, v: Any) -> float:
+        v = float(v)
+        if v < 0:
+            raise ValueError("must be ≥ 0")
+        return v
+
+    @field_validator("scan_rsi_lo", "scan_rsi_hi", mode="before")
+    @classmethod
+    def _valid_rsi(cls, v: Any) -> float:
+        v = float(v)
+        if not 0 <= v <= 100:
+            raise ValueError("RSI must be 0–100")
+        return v
+
+    @classmethod
+    def from_env(cls) -> "Settings":
+        """Load and validate all trading settings from environment / .env."""
+        def _g(key: str, default: str) -> str:
+            val = env_get(key, default)
+            return val if val != "" else default
+
+        return cls(
+            at_symbol           = env_get("AT_SYMBOL", ""),
+            at_threshold        = _g("AT_THRESHOLD",        "0.5"),
+            at_poll             = _g("AT_POLL",             "5"),
+            at_daily_loss_limit = _g("AT_DAILY_LOSS_LIMIT", "0"),
+            scan_top_n          = _g("SCAN_TOP_N",          "10"),
+            scan_rsi_lo         = _g("SCAN_RSI_LO",         "35"),
+            scan_rsi_hi         = _g("SCAN_RSI_HI",         "72"),
+            scan_vol_mult       = _g("SCAN_VOL_MULT",       "1.0"),
+            scan_min_price      = _g("SCAN_MIN_PRICE",      "5.0"),
+            scan_min_adv_m      = _g("SCAN_MIN_ADV_M",      "5.0"),
+            scan_sma20_tol      = _g("SCAN_SMA20_TOL",      "3.0"),
+            scan_min_ret5d      = _g("SCAN_MIN_RET5D",      "-1.0"),
+            scan_watchlist      = env_get("SCAN_WATCHLIST", ""),
+            pm_target_slots     = _g("PM_TARGET_SLOTS",     "10"),
+            pm_slot_pct         = _g("PM_SLOT_PCT",         "10.0"),
+            pm_slot_dollar      = _g("PM_SLOT_DOLLAR",      "3000"),
+        )
+
+
+# Re-export so callers only need one import from core
+__all__ = ["Settings", "ValidationError"]
 
 
 # ── Daily loss persistence ─────────────────────────────────────────────────────

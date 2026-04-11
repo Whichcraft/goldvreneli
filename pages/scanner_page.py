@@ -8,7 +8,7 @@ from autotrader import TraderConfig
 from core import env_get, env_save
 
 
-def render(data_client, get_price_fn, buy_fn, sell_fn, mt, use_hist, as_of_date, broker):
+def render(ctx, mt, use_hist, as_of_date):
     st.subheader("🔍 Position Scanner — Start Here")
     st.caption(
         "Scans liquid stocks, ETFs, and ADRs using technical filters and ranks them by performance. "
@@ -16,7 +16,7 @@ def render(data_client, get_price_fn, buy_fn, sell_fn, mt, use_hist, as_of_date,
         "**Run a scan → use ⚡ Quick Invest to open positions in one click, "
         "or send to 📈 Portfolio Mode for fully automated hands-off investing.**"
     )
-    if broker == "IBKR":
+    if ctx.name == "IBKR":
         st.info(
             "**IBKR broker:** ETFs in the scan results may not support ATR-based stops — "
             "IBKR may not provide intraday high/low bars for ETFs. "
@@ -144,7 +144,7 @@ def render(data_client, get_price_fn, buy_fn, sell_fn, mt, use_hist, as_of_date,
             (st.session_state.scan_results,
              st.session_state.scan_skipped,
              st.session_state.scan_no_data) = scan(
-                data_client, top_n=int(top_n),
+                ctx.data_client, top_n=int(top_n),
                 progress_cb=on_progress, as_of=as_of_dt,
                 filters=scan_filters, symbols=scan_symbols)
         st.session_state.scan_ts = datetime.now()
@@ -285,7 +285,7 @@ def render(data_client, get_price_fn, buy_fn, sell_fn, mt, use_hist, as_of_date,
                                              "Amount": "—", "Status": "⏭ already open — skipped"})
                         continue
                     try:
-                        price = get_price_fn(sym)
+                        price = ctx.get_price(sym)
                         qty   = max(1, int(qi_dollar / price))
                         cfg   = TraderConfig(
                             stop_value    = float(qi_stop),

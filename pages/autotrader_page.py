@@ -9,8 +9,7 @@ from core import LIVE_FILLS_FILE, env_get
 from activity_tracker import render_log
 
 
-def render(mt, get_price_fn, buy_fn, sell_fn, get_bars_fn, get_equity_fn, broker,
-           trading_client, ib):
+def render(mt, ctx, trading_client, ib):
     st.subheader("AutoTrader — Multi-Position Manager")
     st.caption("Enters positions and exits automatically via trailing stop, take-profit, breakeven, or time stop.")
 
@@ -39,14 +38,14 @@ def render(mt, get_price_fn, buy_fn, sell_fn, get_bars_fn, get_equity_fn, broker
 
     # Determine account equity for Risk % mode
     _account_equity = 10000.0
-    if broker == "Alpaca" and trading_client is not None:
+    if ctx.name == "Alpaca" and trading_client is not None:
         try:
             _account_equity = float(trading_client.get_account().equity)
         except Exception:
             pass
-    elif broker == "IBKR" and ib is not None and ib.isConnected():
+    elif ctx.name == "IBKR" and ib is not None and ib.isConnected():
         try:
-            _account_equity = get_equity_fn()
+            _account_equity = ctx.get_equity()
         except Exception:
             pass
 

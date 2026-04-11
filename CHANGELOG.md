@@ -8,6 +8,27 @@ All notable changes to this project will be documented here.
 
 ---
 
+## [1.4.3] — 2026-04-12
+
+### Added
+- **`Settings` Pydantic model** (`core.py`) — validates all trading env vars (`AT_THRESHOLD`, `AT_POLL`, `SCAN_RSI_LO/HI`, `PM_*`, etc.) at startup via `Settings.from_env()`; misconfigurations surface as a UI warning with defaults rather than a cryptic mid-trade crash
+- **`AlpacaStreamManager`** (`stream.py`) — WebSocket price feed via `StockDataStream`; subscribes to symbols lazily on first `get_price()` call; AutoTrader reads from the stream cache with REST fallback, eliminating per-poll HTTP requests for active positions
+- **TTL caching for `get_bars` and `get_equity`** — `cachetools.TTLCache` wraps both callables for Alpaca and IBKR (60 s bars, 30 s equity); cached in `st.session_state` so the cache survives Streamlit reruns and is invalidated on broker switch
+
+---
+
+## [1.4.2] — 2026-04-12
+
+### Added
+- **`BrokerContext` dataclass** (`core.py`) — bundles `get_price`, `buy`, `sell`, `get_bars`, `get_equity`, `data_client`, and `name` into a single object; pages now receive one `ctx` arg instead of 5–8 separate callables
+- **File logging** — `logging.basicConfig` configured at startup; all existing `logger.*` calls in `scanner.py`, `autotrader.py`, `portfolio.py`, `ibkr_data.py`, and `gateway_manager.py` now write to `~/.goldvreneli/goldvreneli.log`
+- **Activity log CSV export** — download button added to the Activity Log table in `autotrader_page`
+
+### Changed
+- Page `render()` signatures simplified: `scanner_page`, `autotrader_page`, `portfolio_mode_page`, and `test_mode_page` all take `ctx: BrokerContext` in place of individual callable args
+
+---
+
 ## [1.4.1] — 2026-03-30
 
 ### Added

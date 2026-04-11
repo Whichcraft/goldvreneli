@@ -6,8 +6,7 @@ from autotrader import TraderState, TraderConfig, StopMode
 from core import env_get, get_portfolio_manager
 
 
-def render(mt, data_client, get_price_fn, buy_fn, sell_fn, get_bars_fn, get_equity_fn,
-           broker, trading_client, ib):
+def render(mt, ctx, trading_client, ib):
     st.subheader("Portfolio Mode")
     st.caption(
         "Automatically maintains up to N positions from scanner picks. "
@@ -80,12 +79,12 @@ def render(mt, data_client, get_price_fn, buy_fn, sell_fn, get_bars_fn, get_equi
         )
         pm = get_portfolio_manager(
             st.session_state,
-            data_client,
-            get_price_fn,
-            buy_fn,
-            sell_fn,
-            get_bars_fn,
-            get_equity_fn,
+            ctx.data_client,
+            ctx.get_price,
+            ctx.buy,
+            ctx.sell,
+            ctx.get_bars,
+            ctx.get_equity,
             target_slots      = int(pm_slots),
             slot_pct          = float(pm_slot_pct),
             slot_dollar       = float(pm_slot_dollar),
@@ -201,7 +200,7 @@ def render(mt, data_client, get_price_fn, buy_fn, sell_fn, get_bars_fn, get_equi
             "(e.g. after an app restart). No new orders are placed — AutoTrader watches "
             "from the current price and sells when the trailing stop is hit."
         )
-        if broker == "Alpaca":
+        if ctx.name == "Alpaca":
             try:
                 acct_positions = trading_client.get_all_positions()
             except Exception as _e:

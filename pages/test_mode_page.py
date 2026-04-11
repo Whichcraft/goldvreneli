@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, time as dtime
 import streamlit as st
 
 from autotrader import MultiTrader
+from core import BrokerContext
 from replay import ReplayPriceFeed
 import pages.autotrader_page as autotrader_page
 
@@ -83,7 +84,7 @@ class _ReplayDispatcher:
 
 # ── Page ──────────────────────────────────────────────────────────────────────
 
-def render(data_client, get_price_fn, get_bars_fn) -> None:
+def render(ctx) -> None:
     st.subheader("🎮 Test Mode — Simulated Trading")
     st.info(
         "Orders are **not** sent to your broker. "
@@ -182,7 +183,7 @@ def render(data_client, get_price_fn, get_bars_fn) -> None:
 
         if replay_mode:
             dispatcher = _ReplayDispatcher(
-                data_client,
+                ctx.data_client,
                 replay_date    = replay_cfg["date"],
                 speed          = replay_cfg["speed"],
                 start_time     = replay_cfg["start_time"],
@@ -193,13 +194,13 @@ def render(data_client, get_price_fn, get_bars_fn) -> None:
             _get_price = dispatcher.get_price
         else:
             st.session_state.pop(_TEST_FEED_KEY, None)
-            _get_price = get_price_fn
+            _get_price = ctx.get_price
 
         st.session_state[_TEST_MT_KEY]  = MultiTrader(
             get_price  = _get_price,
             place_buy  = sim_buy,
             place_sell = sim_sell,
-            get_bars   = get_bars_fn,
+            get_bars   = ctx.get_bars,
         )
         st.session_state[_TEST_CFG_KEY] = replay_cfg
 
@@ -236,10 +237,10 @@ def render(data_client, get_price_fn, get_bars_fn) -> None:
                     pass
             sim_buy2, sim_sell2 = _make_sim_fns()
             _get_price2 = (dispatcher.get_price
-                           if replay_mode and dispatcher else get_price_fn)
+                           if replay_mode and dispatcher else ctx.get_price)
             if replay_mode and replay_cfg:
                 st.session_state[_TEST_FEED_KEY] = _ReplayDispatcher(
-                    data_client,
+                    ctx.data_client,
                     replay_date    = replay_cfg["date"],
                     speed          = replay_cfg["speed"],
                     start_time     = replay_cfg["start_time"],
@@ -251,17 +252,19 @@ def render(data_client, get_price_fn, get_bars_fn) -> None:
                 get_price  = _get_price2,
                 place_buy  = sim_buy2,
                 place_sell = sim_sell2,
-                get_bars   = get_bars_fn,
+                get_bars   = ctx.get_bars,
             )
             st.session_state["test_mode_clear_confirm"] = False
             st.success("Paper account cleared.")
             st.rerun()
 
-    autotrader_page.render(
-        mt, (dispatcher.get_price if replay_mode and dispatcher else get_price_fn),
-        sim_buy, sim_sell, get_bars_fn,
-        get_equity_fn=None,
-        broker="Test Mode",
-        trading_client=None,
-        ib=None,
+    _test_ctx = BrokerContext(
+        name="Test Mode",
+        get_price=(dispatcher.get_price if replay_mode and dispatcher else ctx.get_price),
+        buy=sim_buy,
+        sell=sim_sell,
+        get_bars=ctx.get_bars,
+        get_equity=lambda: 0.0,
+        data_client=ctx.data_client,
     )
+    autotrader_page.render(mt, _test_ctx, trading_client=None, ib=None)
