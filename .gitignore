@@ -3,5 +3,7 @@ __pycache__/
 *.pyc
 .env
 
+CLAUDE.md
+
 # QMD search index
 qmd.sqlite
