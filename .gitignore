@@ -2,8 +2,7 @@ venv/
 __pycache__/
 *.pyc
 .env
-
 CLAUDE.md
-
 # QMD search index
 qmd.sqlite
+answers/

@@ -281,8 +281,23 @@ def render(ctx, mt, use_hist, as_of_date):
                 summary_rows = []
                 for sym in syms:
                     if sym in _open:
-                        summary_rows.append({"Symbol": sym, "Qty": "—", "Price": "—",
-                                             "Amount": "—", "Status": "⏭ already open — skipped"})
+                        # Add to existing position instead of skipping
+                        try:
+                            price = get_price_fn(sym)
+                            qty   = max(1, int(qi_dollar / price))
+                            mt.add_shares(sym, qty)
+                            summary_rows.append({
+                                "Symbol": sym, "Qty": qty,
+                                "Fill ~": f"${price:.2f}",
+                                "Invested": f"${qty * price:,.0f}",
+                                "Status": "✚ Added to position",
+                            })
+                        except Exception as e:
+                            summary_rows.append({
+                                "Symbol": sym, "Qty": "—",
+                                "Fill ~": "—", "Invested": "—",
+                                "Status": f"✗ {e}",
+                            })
                         continue
                     try:
                         price = ctx.get_price(sym)

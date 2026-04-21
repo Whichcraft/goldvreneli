@@ -1,24 +1,16 @@
-import time
-from datetime import datetime
 import streamlit as st
 import pandas as pd
 
 from autotrader import TraderState, TraderConfig, StopMode, EntryMode, size_from_risk
-from replay import load_sessions
-from core import LIVE_FILLS_FILE, env_get
-from activity_tracker import render_log
+from core import env_get
 
 
 def render(mt, ctx, trading_client, ib):
     st.subheader("AutoTrader — Multi-Position Manager")
     st.caption("Enters positions and exits automatically via trailing stop, take-profit, breakeven, or time stop.")
 
-    # ── New position form ─────────────────────────────────────────────
-    # Handle multi-symbol prefill from Scanner.
-    # at_prefill_list / at_prefill are one-shot signals written by the
-    # Scanner page. We immediately move their value into at_current_symbol
-    # (which survives reruns) so the form stays filled on every rerender.
-    _prefill_list = st.session_state.pop("at_prefill_list", None)
+    # ── Multi-symbol prefill from Scanner ──────────────────────────────────
+    _prefill_list   = st.session_state.pop("at_prefill_list", None)
     _prefill_single = st.session_state.pop("at_prefill", None)
     if _prefill_list:
         st.session_state["at_current_symbol"] = _prefill_list[0]
@@ -32,11 +24,10 @@ def render(mt, ctx, trading_client, ib):
 
     _default_symbol = st.session_state.get("at_current_symbol") or env_get("AT_SYMBOL", "")
 
-    # Qty sizing — outside form so radio switches update inputs immediately
+    # ── Qty mode (outside form so radio changes update inputs immediately) ──
     qty_mode = st.radio("Qty mode", ["Shares", "Dollar amount", "Risk %"],
                         horizontal=True, label_visibility="collapsed", key="at_qty_mode")
 
-    # Determine account equity for Risk % mode
     _account_equity = 10000.0
     if ctx.name == "Alpaca" and trading_client is not None:
         try:
@@ -62,8 +53,7 @@ def render(mt, ctx, trading_client, ib):
     else:  # Risk %
         rc1, rc2, rc3, rc4 = st.columns(4)
         at_equity    = rc1.number_input("Account equity ($)", min_value=1.0,
-                                         value=_account_equity,
-                                         step=500.0, key="at_equity")
+                                         value=_account_equity, step=500.0, key="at_equity")
         at_risk_pct  = rc2.number_input("Risk per trade (%)", min_value=0.1,
                                          max_value=10.0, value=1.0, step=0.1, key="at_risk_pct")
         at_entry_est = rc3.number_input("Est. entry price ($)", min_value=0.01,
@@ -76,10 +66,11 @@ def render(mt, ctx, trading_client, ib):
         st.caption(f"**{at_qty}** shares — risking "
                    f"${at_equity * at_risk_pct / 100:,.2f} @ ${stop_dist_est:.2f} stop dist")
 
+    # ── Position configuration form ─────────────────────────────────────────
     with st.form("at_config"):
         st.markdown("**New Position**")
         c1, c2, c3 = st.columns(3)
-        at_symbol   = c1.text_input("Symbol", value=_default_symbol).upper()
+        at_symbol    = c1.text_input("Symbol", value=_default_symbol).upper()
         at_stop_mode = c2.selectbox("Stop Mode", ["PCT", "ATR"],
                                     help="PCT = fixed %; ATR = N × ATR(14) dollars")
         at_stop_val  = c3.number_input(
@@ -88,9 +79,6 @@ def render(mt, ctx, trading_client, ib):
             value=float(env_get("AT_THRESHOLD", "0.5")), step=0.1,
             help="For PCT: % drop from peak triggers sell. For ATR: multiplier × ATR(14).",
         )
-
-        at_poll = st.number_input("Poll interval (s)", min_value=1,
-                                  value=int(env_get("AT_POLL", "5")), step=1)
 
         with st.expander("Entry mode"):
             at_entry_mode    = st.selectbox("Entry", ["MARKET", "LIMIT", "SCALE"])
@@ -106,20 +94,24 @@ def render(mt, ctx, trading_client, ib):
                                                  value=30, step=5, disabled=(at_entry_mode != "SCALE"))
 
         with st.expander("Exit targets"):
-            xc1, xc2         = st.columns(2)
-            at_tp_pct        = xc1.number_input("Take-profit trigger (%)", min_value=0.0, value=0.0, step=0.1,
-                                                 help="0 = disabled. Sell at_tp_fraction of position when up this %.")
-            at_tp_frac       = xc2.slider("Fraction to sell at take-profit", min_value=0.1,
-                                           max_value=1.0, value=1.0, step=0.1)
-            xc3, xc4         = st.columns(2)
-            at_be_pct        = xc3.number_input("Breakeven trigger (%)", min_value=0.0, value=0.0, step=0.1,
-                                                 help="0 = disabled. Once up this %, move stop floor to entry price.")
-            at_time_stop     = xc4.number_input("Time stop (minutes)", min_value=0, value=0, step=5,
-                                                 help="0 = disabled. Exit after this many minutes.")
-            xc5, _           = st.columns(2)
-            at_max_loss_pct  = xc5.number_input("Max loss from entry (%)", min_value=0.0, value=0.0, step=0.5,
-                                                 help="0 = disabled. Hard exit if price drops this % below entry — "
-                                                      "catches gap-downs that blow past the trailing stop.")
+            xc1, xc2     = st.columns(2)
+            at_tp_pct    = xc1.number_input(
+                "Take-profit trigger (%)", min_value=0.0,
+                value=float(env_get("AT_TP_TRIGGER", "1.5")), step=0.1,
+                help="Sell at_tp_fraction of position when up this %. 0 = disabled.",
+            )
+            at_tp_frac   = xc2.slider("Fraction to sell at take-profit", min_value=0.1,
+                                       max_value=1.0, value=0.5, step=0.1)
+            xc3, xc4     = st.columns(2)
+            at_be_pct    = xc3.number_input("Breakeven trigger (%)", min_value=0.0, value=0.0, step=0.1,
+                                             help="0 = disabled. Once up this %, move stop floor to entry price.")
+            at_time_stop = xc4.number_input("Time stop (minutes)", min_value=0, value=0, step=5,
+                                             help="0 = disabled. Exit after this many minutes.")
+            xc5, _       = st.columns(2)
+            at_max_loss_pct = xc5.number_input(
+                "Max loss from entry (%)", min_value=0.0, value=0.0, step=0.5,
+                help="0 = disabled. Hard exit if price drops this % below entry.",
+            )
 
         col_start, col_stop_all = st.columns(2)
         start_btn    = col_start.form_submit_button("▶ Start", type="primary")
@@ -132,7 +124,7 @@ def render(mt, ctx, trading_client, ib):
             cfg = TraderConfig(
                 stop_mode             = StopMode(at_stop_mode.lower()),
                 stop_value            = at_stop_val,
-                poll_interval         = float(at_poll),
+                poll_interval         = float(env_get("AT_POLL", "5")),
                 entry_mode            = EntryMode(at_entry_mode.lower()),
                 limit_price           = at_limit_price,
                 limit_timeout_s       = float(at_limit_timeout),
@@ -148,7 +140,6 @@ def render(mt, ctx, trading_client, ib):
                 mt.start(at_symbol, int(at_qty), config=cfg)
                 queue = st.session_state.pop("at_queue", [])
                 if queue:
-                    # Advance to next symbol immediately so the form is ready
                     st.session_state["at_current_symbol"] = queue[0]
                     remaining = queue[1:]
                     if remaining:
@@ -171,181 +162,17 @@ def render(mt, ctx, trading_client, ib):
         q = st.session_state["at_queue"]
         st.info(f"Queue: {' → '.join(q)}  (configure & start each in turn)")
 
-    # ── Live positions (fragment — refreshes independently of the form above)
-    @st.fragment
-    def _live_view():
-        statuses = mt.statuses()
-        if not statuses:
-            scan_done = st.session_state.get("scan_ts") is not None
-            scan_has_results = not st.session_state.get("scan_results", pd.DataFrame()).empty
-            if not scan_done:
-                st.info(
-                    "💡 **No positions yet.** "
-                    "Go to **🔍 Scanner** first to find the best stocks, "
-                    "then use **⚡ Quick Invest** to open positions in one click — "
-                    "or configure a symbol manually in the form above."
-                )
-            elif scan_has_results:
-                st.info(
-                    "💡 **Scanner results are ready.** "
-                    "Go to **🔍 Scanner → ⚡ Quick Invest** to open positions, "
-                    "or fill in the symbol form above."
-                )
-            else:
-                st.info("💡 Configure a symbol above and click **Start** to open a position.")
-        if statuses:
-            state_color = {
-                "idle":     "gray",
-                "entering": "blue",
-                "watching": "green",
-                "sold":     "blue",
-                "stopped":  "orange",
-                "error":    "red",
-            }
-
-            st.divider()
-            st.subheader("Positions")
-
-            rows = []
-            for sym, s in statuses.items():
-                rows.append({
-                    "Symbol":   sym,
-                    "State":    s.state.value.upper(),
-                    "Entry":    f"${s.entry_price:.2f}",
-                    "Current":  f"${s.current_price:.2f}",
-                    "Peak":     f"${s.peak_price:.2f}",
-                    "Stop":     f"${s.stop_floor:.2f}",
-                    "Drawdown": f"{s.drawdown_pct:.2f}%",
-                    "P&L":      f"${s.pnl:+,.2f}",
-                    "Mode":     s.config.stop_mode.value.upper(),
-                    "ATR":      f"${s.atr_value:.2f}" if s.atr_value else "—",
-                    "BE":       "✓" if s.breakeven_active else "—",
-                    "TP":       "✓" if s.tp_executed else "—",
-                })
-            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
-
-            # Per-position drawdown bars and stop buttons
-            active = [(sym, s) for sym, s in statuses.items()
-                      if s.state == TraderState.WATCHING]
-            if active:
-                for sym, s in active:
-                    with st.container(border=True):
-                        mc1, mc2, mc3, mc4, mc5 = st.columns([2, 2, 2, 2, 1])
-                        mc1.metric("Symbol",  sym)
-                        mc2.metric("Current", f"${s.current_price:.2f}",
-                                   delta=f"Entry ${s.entry_price:.2f}")
-                        mc3.metric("Peak",    f"${s.peak_price:.2f}")
-                        mc4.metric("Stop",    f"${s.stop_floor:.2f}")
-                        if mc5.button("Stop", key=f"stop_{sym}"):
-                            mt.stop(sym)
-                            st.rerun()
-
-                        pnl_color = "green" if s.pnl >= 0 else "red"
-                        st.markdown(f"**P&L:** :{pnl_color}[${s.pnl:+,.2f}]")
-                        pct = min(s.drawdown_pct / s.threshold_pct, 1.0) if s.threshold_pct else 0.0
-                        st.progress(pct, text=f"Drawdown {s.drawdown_pct:.2f}% / {s.threshold_pct:.2f}%")
-
-                        # Live trailing-stop adjustment (PCT mode only)
-                        if s.config.stop_mode.value == "pct":
-                            new_stop = st.number_input(
-                                "Trailing stop %", min_value=0.1, max_value=50.0, step=0.1,
-                                value=float(s.config.stop_value),
-                                key=f"thresh_{sym}",
-                                label_visibility="collapsed",
-                            )
-                            if abs(new_stop - s.config.stop_value) > 0.001:
-                                mt.set_threshold(sym, new_stop)
-
-                        # Stall warning: if last poll was more than 3× poll_interval ago
-                        if s.last_poll_at is not None:
-                            lag = (datetime.now() - s.last_poll_at).total_seconds()
-                            if lag > 3 * s.config.poll_interval:
-                                st.warning(f"⚠️ Price feed may be stalled — last poll {lag:.0f}s ago")
-                        if s.breakeven_active:
-                            st.caption("Breakeven active — stop floor at entry")
-                        if s.tp_executed:
-                            st.caption("Take-profit executed — trailing remaining shares")
-
-            # Error-state positions — allow restart
-            errored = [(sym, s) for sym, s in statuses.items()
-                       if s.state == TraderState.ERROR]
-            if errored:
-                st.markdown("**Errored positions**")
-                for sym, s in errored:
-                    with st.container(border=True):
-                        ec1, ec2 = st.columns([4, 1])
-                        ec1.markdown(f":red[**{sym}**] — ERROR")
-                        if s.entry_price:
-                            ec1.caption(f"Entry ${s.entry_price:.2f}  ·  Qty {s.qty}")
-                        confirmed = st.checkbox(f"Confirm restart {sym}", key=f"err_confirm_{sym}")
-                        if ec2.button("Restart", key=f"restart_{sym}", disabled=not confirmed):
-                            import dataclasses
-                            mt.stop(sym)
-                            mt.start(sym, s.qty, dataclasses.replace(s.config))
-                            st.rerun()
-
-            # Daily summary
-            st.divider()
-            dl1, dl2 = st.columns(2)
-            dl1.metric("Unrealized P&L (active)", f"${mt.unrealized_pnl():+,.2f}")
-            dl2.metric("Realized P&L today",     f"${mt.realized_losses():+,.2f}")
-
-            # Combined log
-            render_log(mt)
-
-        # ── Live trade history ────────────────────────────────────────────────
+    # ── Quick P&L summary ───────────────────────────────────────────────────
+    statuses = mt.statuses()
+    if statuses:
+        active_count = sum(
+            1 for s in statuses.values()
+            if s.state in (TraderState.ENTERING, TraderState.WATCHING)
+        )
         st.divider()
-        st.subheader("Trade History")
-        live_sessions = load_sessions(LIVE_FILLS_FILE)
-        if live_sessions:
-            hist_rows = []
-            for s in live_sessions:
-                fills = s.get("fills", [])
-                buys  = [f for f in fills if f["action"] == "BUY"]
-                sells = [f for f in fills if f["action"] == "SELL"]
-                hist_rows.append({
-                    "Started": s.get("started_at", "")[:19],
-                    "Closed":  s.get("closed_at", "")[:19] if s.get("closed_at") else "open",
-                    "Symbol":  s.get("meta", {}).get("symbol", "—"),
-                    "Buys":    len(buys),
-                    "Sells":   len(sells),
-                    "P&L":     f"${s['pnl']:+,.2f}" if s.get("pnl") is not None else "—",
-                })
-            hist_df = pd.DataFrame(hist_rows)
-            st.dataframe(hist_df, width="stretch", hide_index=True)
-
-            # ── CSV export ────────────────────────────────────────────────────
-            all_fills = []
-            for s in live_sessions:
-                sym = s.get("meta", {}).get("symbol", "")
-                for f in s.get("fills", []):
-                    all_fills.append({**f, "symbol": f.get("symbol") or sym,
-                                      "session_pnl": s.get("pnl")})
-            if all_fills:
-                csv_bytes = pd.DataFrame(all_fills).to_csv(index=False).encode()
-                st.download_button("⬇ Download fills CSV", data=csv_bytes,
-                                   file_name="live_fills.csv", mime="text/csv")
-
-            for s in live_sessions[:5]:
-                fills = s.get("fills", [])
-                if not fills:
-                    continue
-                sym     = s.get("meta", {}).get("symbol", "?")
-                pnl_str = f"${s['pnl']:+,.2f}" if s.get("pnl") is not None else "open"
-                with st.expander(f"{sym}  {s.get('started_at','')[:10]}  P&L {pnl_str}"):
-                    st.dataframe(pd.DataFrame(fills), width="stretch", hide_index=True)
-        else:
-            st.caption("No live trades recorded yet.")
-
-        # Auto-refresh the fragment while any position is active, or once more
-        # when the session count changes (catches auto-sell writing a new entry)
-        session_count = len(live_sessions)
-        prev_count = st.session_state.get("_hist_session_count", session_count)
-        st.session_state["_hist_session_count"] = session_count
-        has_active = any(s.state in (TraderState.ENTERING, TraderState.WATCHING)
-                         for s in mt.statuses().values())
-        if has_active or session_count != prev_count:
-            time.sleep(5)
-            st.rerun()
-
-    _live_view()
+        dl1, dl2, dl3 = st.columns(3)
+        dl1.metric("Active positions",        str(active_count))
+        dl2.metric("Unrealized P&L (active)", f"${mt.unrealized_pnl():+,.2f}")
+        dl3.metric("Realized P&L today",      f"${mt.realized_losses():+,.2f}")
+        if active_count:
+            st.info("Go to **📊 Positions** to see live cards and activity logs.")

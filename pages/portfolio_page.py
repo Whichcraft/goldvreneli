@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from core import env_get, get_alpaca_clients
 from scanner import UNIVERSE
@@ -18,8 +18,6 @@ def render(broker, trading_client, data_client, account, ib, gw, alpaca_is_live,
 def _render_alpaca(trading_client, data_client, account, ib, alpaca_is_live):
     from alpaca.trading.requests import MarketOrderRequest, LimitOrderRequest, GetOrdersRequest
     from alpaca.trading.enums import OrderSide, TimeInForce, QueryOrderStatus
-    from alpaca.data.requests import StockBarsRequest
-    from alpaca.data.timeframe import TimeFrame
 
     _mode_label = "Live" if alpaca_is_live else "Paper"
 
@@ -175,36 +173,6 @@ def _render_alpaca(trading_client, data_client, account, ib, alpaca_is_live):
                 st.info("No open positions in IBKR.")
     except Exception:
         pass
-
-    st.divider()
-
-    st.subheader("Price Chart")
-    chart_symbol  = st.text_input("Symbol",
-                                   value=st.session_state.get("_chart_sym", "AAPL")).upper()
-    st.session_state["_chart_sym"] = chart_symbol
-    timeframe_opt = st.selectbox("Timeframe", ["1D", "1W", "1M", "3M"], index=2)
-    tf_map   = {"1D": (1,  TimeFrame.Hour), "1W": (7,  TimeFrame.Hour),
-                "1M": (30, TimeFrame.Day),  "3M": (90, TimeFrame.Day)}
-    days, tf = tf_map[timeframe_opt]
-
-    if chart_symbol:
-        try:
-            bars = data_client.get_stock_bars(StockBarsRequest(
-                symbol_or_symbols=chart_symbol, timeframe=tf,
-                start=datetime.now() - timedelta(days=days),
-            )).df
-            if not bars.empty:
-                bars = bars.reset_index()
-                fig2 = go.Figure(go.Candlestick(
-                    x=bars["timestamp"],
-                    open=bars["open"], high=bars["high"],
-                    low=bars["low"],   close=bars["close"],
-                ))
-                fig2.update_layout(title=f"{chart_symbol} — {timeframe_opt}",
-                                   xaxis_rangeslider_visible=False, height=400)
-                st.plotly_chart(fig2, width="stretch")
-        except Exception as e:
-            st.error(f"Chart error: {e}")
 
     st.divider()
 

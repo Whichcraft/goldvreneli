@@ -310,6 +310,31 @@ class AutoTrader:
         self.status.config.stop_value = pct
         self.status.threshold_pct     = pct
 
+    def add_shares(self, qty: int):
+        """Add shares to an existing WATCHING position.
+
+        Places an immediate market buy, updates qty/qty_remaining, and
+        recalculates the weighted average entry price.  The stop floor and
+        peak are unchanged — the trailing stop continues from the current
+        high-water mark.
+        """
+        if self.status.state != TraderState.WATCHING:
+            raise RuntimeError(
+                f"Cannot add shares: position is {self.status.state.value}, must be WATCHING"
+            )
+        if qty < 1:
+            raise ValueError(f"qty must be >= 1, got {qty}")
+        s = self.status
+        price = self._get_price(s.symbol)
+        self._place_buy(s.symbol, qty)
+        new_total    = s.qty + qty
+        s.entry_price = (s.entry_price * s.qty + price * qty) / new_total
+        s.qty         += qty
+        s.qty_remaining += qty
+        self._update_stop_floor()
+        self._log("BUY", price,
+                  f"Added {qty} shares @ ${price:.2f} — {s.qty} total, avg entry ${s.entry_price:.2f}")
+
     def attach(
         self,
         symbol:      str,
@@ -556,7 +581,7 @@ class AutoTrader:
                 if price > s.peak_price:
                     s.peak_price = price
                     self._update_stop_floor()
-                    self._log("PEAK", price, f"New peak ${price:.2f} | new stop floor ${s.stop_floor:.2f}")
+                    self._log("PEAK", price, f"new stop → ${s.stop_floor:.2f}")
 
                 # Breakeven activation
                 if (not s.breakeven_active
@@ -868,6 +893,15 @@ class MultiTrader:
             at = self._traders.get(symbol)
         if at and at.status.state == TraderState.WATCHING:
             at.set_threshold(pct)
+
+    def add_shares(self, symbol: str, qty: int):
+        """Add shares to an existing WATCHING position."""
+        symbol = symbol.upper()
+        with self._loss_lock:
+            at = self._traders.get(symbol)
+        if at is None:
+            raise RuntimeError(f"{symbol} is not being tracked")
+        at.add_shares(qty)
 
     def stop(self, symbol: str):
         """Stop a single position by symbol (does not sell)."""

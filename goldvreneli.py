@@ -54,7 +54,9 @@ import pages.help_page as help_page
 import pages.portfolio_page as portfolio_page
 import pages.autotrader_page as autotrader_page
 import pages.portfolio_mode_page as portfolio_mode_page
+import pages.positions_page as positions_page
 import pages.scanner_page as scanner_page
+import pages.statistics_page as statistics_page
 import pages.test_mode_page as test_mode_page
 from ibkr_data import IBKRDataClient
 
@@ -102,8 +104,17 @@ with st.sidebar:
             st.session_state.pop("nav_test", None)
 
     # ── Main nav ──────────────────────────────────────────────────────────
-    _main_pages = ["Scanner", "Portfolio Mode", "AutoTrader", "Portfolio", "Settings", "Help"]
-    _main_icons = ["🔍", "📈", "🤖", "💼", "⚙️", "❓"]
+    _main_pages = [
+        "Scanner",
+        "Portfolio Mode",
+        "AutoTrader",
+        "Positions",
+        "Portfolio",
+        "Statistics",
+        "Settings",
+        "Help",
+    ]
+    _main_icons = ["🔍", "📈", "🤖", "📊", "💼", "📈", "⚙️", "❓"]
     page = st.radio(
         "Page",
         _main_pages,
@@ -354,6 +365,10 @@ if broker == "Alpaca":
         autotrader_page.render(mt, ctx, trading_client, None)
     elif page == "Portfolio Mode":
         portfolio_mode_page.render(mt, ctx, trading_client, None)
+    elif page == "Positions":
+        positions_page.render(mt)
+    elif page == "Statistics":
+        statistics_page.render(data_client, broker, trading_client, _get_ib(), alpaca_is_live)
     elif page == "Scanner":
         scanner_page.render(ctx, mt, use_hist, as_of_date)
     elif page == "Test Mode":
@@ -583,6 +598,10 @@ else:
         autotrader_page.render(mt, ctx, None, ib)
     elif page == "Portfolio Mode":
         portfolio_mode_page.render(mt, ctx, None, ib)
+    elif page == "Positions":
+        positions_page.render(mt)
+    elif page == "Statistics":
+        statistics_page.render(data_client, broker, None, ib, alpaca_is_live)
     elif page == "Scanner":
         scanner_page.render(ctx, mt, use_hist, as_of_date)
     elif page == "Test Mode":

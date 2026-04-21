@@ -23,6 +23,16 @@ Run with `venv/bin/python -m pytest tests/ -v`
 - IBKR caveat: ETF ATR stops may fall back to PCT stops (no intraday high/low bars)
 - `st.session_state.scan_results` — scan results persist across reruns
 
+## Release cycle
+
+After completing any feature or fix work, always follow this release cycle in order:
+
+1. **Develop on dev** — always perform work on the `dev` branch.
+2. **Bump version** — bump `version.py` (Patch by default), update `README.md` badge and `CHANGELOG.md`.
+3. **Test** — run `venv/bin/python -m pytest tests/ -v`.
+4. **Push to dev** — commit and push to the `dev` branch.
+5. **Sync to main** — merge `dev` into `main` and push.
+
 ## Branching
 Always develop on the `dev` branch. Never commit directly to `main`. After a release, fast-forward `dev` to `main` so all branches stay in sync.
 
